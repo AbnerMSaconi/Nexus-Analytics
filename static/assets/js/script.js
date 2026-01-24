@@ -1,7 +1,7 @@
-/* UCDB-IA | Lógica de Interface (Sidebars Off-Canvas) */
+/* UCDB-IA | Lógica de Mensageiro (Bolhas Alinhadas) */
 
 window.onload = () => {
-    // --- Referências ---
+    // Referências
     const corpo = document.body;
     const btnEsq = document.getElementById('btn-lateral-esquerda');
     const btnDir = document.getElementById('btn-lateral-direita');
@@ -10,7 +10,6 @@ window.onload = () => {
     const listaMateriais = document.getElementById('lista-materiais');
     const areaFontes = document.getElementById('conteudo-fontes');
     
-    // Áreas de Conteúdo e Chat
     const painelChat = document.getElementById('fluxo-conversa');
     const entradaHome = document.getElementById('entrada-inicial');
     const entradaChat = document.getElementById('entrada-usuario');
@@ -18,14 +17,13 @@ window.onload = () => {
     const btnChat = document.getElementById('btn-enviar');
 
     const iconesMap = { "Engenharias": "fa-microchip", "Direito": "fa-gavel", "Saúde": "fa-stethoscope", "Humanas": "fa-users" };
+    let areaSelecionada = null;
 
-    // --- 1. Lógica de Alternância das Sidebars (Toggle) ---
-    
+    // --- 1. UI Toggles ---
     function toggleSidebar(lado) {
         if (lado === 'esquerda') {
             painelEsq.classList.toggle('visivel');
-            btnEsq.classList.toggle('ativo'); // Feedback visual no botão
-            // Fecha a direita se estiver aberta (opcional, bom para mobile)
+            btnEsq.classList.toggle('ativo');
             if (window.innerWidth < 1000) {
                 painelDir.classList.remove('visivel');
                 btnDir.classList.remove('ativo');
@@ -43,12 +41,10 @@ window.onload = () => {
     btnEsq.onclick = () => toggleSidebar('esquerda');
     btnDir.onclick = () => toggleSidebar('direita');
 
-    // --- 2. Transição Home -> Chat ---
     function ativarModoChat(msg = "") {
         if (corpo.classList.contains('estado-inicial')) {
             corpo.classList.remove('estado-inicial');
-            // Garante scroll no fim
-            setTimeout(() => { painelChat.scrollTop = painelChat.scrollHeight; }, 50);
+            setTimeout(() => { painelChat.scrollTop = painelChat.scrollHeight; }, 100);
         }
         if (msg) {
             entradaChat.value = msg;
@@ -56,48 +52,66 @@ window.onload = () => {
         }
     }
 
-    // --- 3. Chat e Streaming ---
-    function criarMsg(tipo, htmlContent) {
-        const div = document.createElement('div');
-        div.className = `msg ${tipo === 'user' ? 'usuario' : 'bot'}`;
+    // --- 2. Criação de Mensagens (Estrutura Row + Bubble) ---
+    function adicionarMensagem(tipo, conteudo) {
+        // 1. Cria a linha (Trilho)
+        const linha = document.createElement('div');
+        linha.className = `chat-row ${tipo === 'user' ? 'user' : 'bot'}`;
         
-        // Se for user, texto puro (segurança). Se bot, HTML (Markdown)
-        if(tipo === 'user') div.textContent = htmlContent;
-        else div.innerHTML = htmlContent;
-
-        painelChat.appendChild(div);
+        // 2. Cria a bolha visual
+        const bolha = document.createElement('div');
+        bolha.className = `msg-bubble ${tipo === 'user' ? 'usuario' : 'bot'}`;
+        
+        // 3. Conteúdo (Texto ou Markdown)
+        const inner = document.createElement('div');
+        inner.className = 'conteudo-texto';
+        
+        if (tipo === 'user') inner.textContent = conteudo;
+        else inner.innerHTML = marked.parse(conteudo);
+        
+        bolha.appendChild(inner);
+        linha.appendChild(bolha);
+        painelChat.appendChild(linha);
+        
         painelChat.scrollTop = painelChat.scrollHeight;
-        return div;
+        return linha; // Retorna a linha para controle
     }
 
     async function executarConsulta() {
         const texto = entradaChat.value.trim();
         if (!texto || btnChat.disabled) return;
 
-        criarMsg('user', texto);
+        adicionarMensagem('user', texto);
         entradaChat.value = '';
-        entradaChat.style.height = 'auto';
+        entradaChat.style.height = '24px';
         btnChat.disabled = true;
 
-        const botMsg = criarMsg('ai', '...'); // Placeholder
+        const linhaBot = adicionarMensagem('ai', '...');
+        const alvo = linhaBot.querySelector('.conteudo-texto'); // Busca o alvo dentro da bolha
         let buffer = '';
 
         try {
+            // AGORA ENVIAMOS A ÁREA NO CORPO DO JSON
+            const payload = { 
+                message: texto,
+                area: areaSelecionada // <--- NOVO CAMPO
+            };
+
             const res = await fetch('/chat', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ message: texto })
+                body: JSON.stringify(payload)
             });
 
             const reader = res.body.getReader();
             const decoder = new TextDecoder();
-            botMsg.innerHTML = ''; // Limpa o "..."
+            alvo.innerHTML = '';
 
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) {
-                    botMsg.innerHTML = marked.parse(buffer);
-                    if (window.MathJax) MathJax.typesetPromise([botMsg]);
+                    alvo.innerHTML = marked.parse(buffer);
+                    if (window.MathJax) MathJax.typesetPromise([alvo]);
                     break;
                 }
                 const chunk = decoder.decode(value);
@@ -106,32 +120,39 @@ window.onload = () => {
                     if (line.startsWith('data:')) {
                         try {
                             const data = JSON.parse(line.replace('data: ', '').trim());
-                            if (data.type === 'start') botMsg.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Analisando...';
+                            if (data.type === 'start') alvo.innerHTML = '<i><i class="fas fa-spinner fa-spin"></i> Processando...</i>';
                             else if (data.type === 'chunk') {
                                 buffer = data.content;
-                                botMsg.textContent = buffer + ' ▎';
+                                alvo.textContent = buffer + ' ▎';
                                 painelChat.scrollTop = painelChat.scrollHeight;
                             } else if (data.type === 'source_chunks') {
                                 renderizarReferencias(data.content);
-                                // Opcional: Abrir sidebar direita automaticamente quando chegarem fontes
-                                // if (!painelDir.classList.contains('visivel')) toggleSidebar('direita');
+                                if (window.innerWidth > 1000 && !painelDir.classList.contains('visivel')) {
+                                    toggleSidebar('direita');
+                                }
                             }
                         } catch (e) {}
                     }
                 });
             }
-        } catch (e) {
-            botMsg.innerHTML = '<span style="color:#ef4444">Erro de conexão.</span>';
-        } finally {
-            btnChat.disabled = false;
-        }
+        } catch (e) { alvo.innerHTML = '<span style="color:red">Erro de conexão.</span>'; }
+        finally { btnChat.disabled = false; }
     }
+    // --- Atualizar os Listeners dos Cards ---
+    document.querySelectorAll('.card-area').forEach(c => {
+        c.onclick = () => {
+            // Captura o nome exato da pasta (ex: "Engenharias")
+            // Certifique-se que o data-area no HTML bate com o nome da pasta no Windows/Linux
+            areaSelecionada = c.getAttribute('data-area'); 
+            
+            ativarModoChat(`Olá Especialista em ${areaSelecionada}, tenho uma dúvida.`);
+        };
+    });
 
-    // --- 4. Renderizadores de Conteúdo ---
     function renderizarReferencias(fontes) {
         areaFontes.innerHTML = '';
         if(!fontes || fontes.length === 0) {
-            areaFontes.innerHTML = '<p style="color:#64748b; padding:10px">Sem fontes citadas.</p>';
+            areaFontes.innerHTML = '<p class="vazio">Sem citações.</p>';
             return;
         }
         fontes.forEach(f => {
@@ -142,47 +163,38 @@ window.onload = () => {
         });
     }
 
-    async function carregarSidebar() {
+    // --- 3. Inicialização e Listeners ---
+    (async () => {
         try {
             const res = await fetch('/knowledge-areas');
             const data = await res.json();
             const cats = data.categorias || {};
-            listaMateriais.innerHTML = '';
+            listaMateriais.innerHTML = Object.keys(cats).length ? '' : '<div style="padding:15px;color:#64748b">Vazio</div>';
             
-            if(Object.keys(cats).length === 0) {
-                listaMateriais.innerHTML = '<div style="padding:15px; color:#64748b">Repositório vazio.</div>';
-                return;
-            }
-
             Object.keys(cats).forEach(cat => {
                 const div = document.createElement('div');
                 div.className = 'sidebar-block';
-                div.innerHTML = `
-                    <div class="block-header"><i class="fas ${iconesMap[cat] || 'fa-folder'}"></i> <span>${cat}</span></div>
-                    <ul class="block-list">${cats[cat].map(t => `<li><i class="far fa-file-alt"></i> ${t.substring(0,35)}...</li>`).join('')}</ul>
-                `;
+                div.innerHTML = `<div class="block-header"><i class="fas ${iconesMap[cat]||'fa-folder'}"></i><span>${cat}</span></div><ul class="block-list">${cats[cat].map(t=>`<li title="${t}"><i class="far fa-file-pdf"></i> ${t.substring(0,28)}...</li>`).join('')}</ul>`;
                 listaMateriais.appendChild(div);
             });
-        } catch (e) { console.error(e); }
-    }
+        } catch(e) {}
+    })();
 
-    // --- 5. Listeners ---
-    btnHome.onclick = () => ativarModoChat(entradaHome.value);
+    document.getElementById('btn-enviar-inicial').onclick = () => ativarModoChat(document.getElementById('entrada-inicial').value);
     btnChat.onclick = executarConsulta;
     
-    document.querySelectorAll('.card-area').forEach(c => {
-        c.onclick = () => ativarModoChat(`Olá, preciso de ajuda com ${c.getAttribute('data-area')}.`);
-    });
+    document.querySelectorAll('.card-area').forEach(c => c.onclick = () => ativarModoChat(`Olá Especialista em ${c.dataset.area}, gostaria de tirar uma dúvida.`));
 
-    [entradaHome, entradaChat].forEach(el => {
+    [document.getElementById('entrada-inicial'), entradaChat].forEach(el => {
         el.onkeydown = (e) => {
-            if(e.key === 'Enter' && !e.shiftKey) {
+            if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
-                el === entradaHome ? btnHome.click() : btnChat.click();
+                el.id === 'entrada-inicial' ? ativarModoChat(el.value) : executarConsulta();
             }
         };
-        el.oninput = function() { this.style.height = 'auto'; this.style.height = this.scrollHeight + 'px'; };
+        el.oninput = function() {
+            this.style.height = '24px';
+            if (this.scrollHeight > 30) this.style.height = this.scrollHeight + 'px';
+        };
     });
-
-    carregarSidebar();
 };

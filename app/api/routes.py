@@ -1,94 +1,102 @@
 """
-UCDB-IA | Roteamento de Produção e Agentes
+UCDB-IA | Roteamento com Seleção Dinâmica de Base de Conhecimento
 """
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse, FileResponse
 from app.api.schemas import ChatRequest
 from app.utils.logger import logger
 from app.core.config import settings
-import json, asyncio, uuid, os, html
-from urllib.parse import quote
+from app.core.rag import carregar_motor_especifico, inicializar_bases_de_conhecimento
+import json, asyncio, os, html
 
 router = APIRouter()
 
-# --- Cache de Motor ---
-_rag_chain = None
-
-def _get_engine():
-    global _rag_chain
-    if _rag_chain: return _rag_chain
-    try:
-        from app.core.rag import criar_vectorstore, criar_rag_chain
-        vs = criar_vectorstore()
-        if vs:
-            _rag_chain = criar_rag_chain(vs)
-            return _rag_chain
-    except: pass
-    return None
+# Cache de motores carregados para não abrir o disco a toda hora
+_motores_cache = {}
 
 @router.get("/")
 async def index():
     return FileResponse(os.path.join(settings.static_path, "index.html"))
 
 @router.get("/knowledge-areas")
-async def listar_materiais_organizados():
-    """Retorna materiais agrupados por blocos disciplinares para a Sidebar."""
-    vs_path = settings.vectorstore_path
-    manifesto_path = os.path.join(vs_path, "manifest.json")
-    
-    if not os.path.exists(manifesto_path):
+async def listar_areas_reais():
+    """
+    Lista as pastas reais dentro de /pdfs para montar o menu lateral.
+    """
+    if not os.path.exists(settings.pdf_path):
         return {"categorias": {}}
     
-    try:
-        with open(manifesto_path, "r", encoding="utf-8") as f:
-            manifesto = json.load(f)
+    # Lê as pastas físicas
+    areas = [d for d in os.listdir(settings.pdf_path) if os.path.isdir(os.path.join(settings.pdf_path, d))]
+    
+    estrutura = {}
+    for area in areas:
+        # Lista os arquivos dentro de cada pasta de área
+        arquivos = os.listdir(os.path.join(settings.pdf_path, area))
+        estrutura[area] = [f for f in arquivos if f.endswith(".pdf")]
         
-        agrupado = {}
-        for info in manifesto.values():
-            cat = info.get("categoria", "Material Geral")
-            tit = info.get("titulo", "Sem Título")
-            if cat not in agrupado: agrupado[cat] = []
-            if tit not in agrupado[cat]: agrupado[cat].append(tit)
-        
-        return {"categorias": agrupado}
-    except Exception as e:
-        logger.error(f"Erro ao processar categorias: {e}")
-        return {"categorias": {}}
+    return {"categorias": estrutura}
+
+def _identificar_area_no_texto(mensagem: str, areas_disponiveis: list):
+    """Tenta descobrir qual especialista o usuário quer baseado na mensagem."""
+    mensagem = mensagem.lower()
+    for area in areas_disponiveis:
+        if area.lower() in mensagem:
+            return area
+    return None
 
 @router.post("/chat")
 async def chat(request: Request, body: ChatRequest):
+    # Recupera ou inicia o estado da sessão
+    session = request.session
+    area_atual = session.get("area_atual", "Geral") # Padrão se não achar nada
+
+    # 1. Tenta detectar troca de especialista na mensagem (Ex: "Olá Especialista em Direito")
+    # Lista áreas reais disponíveis no disco
+    areas_reais = [d for d in os.listdir(settings.pdf_path) if os.path.isdir(os.path.join(settings.pdf_path, d))]
+    nova_area = _identificar_area_no_texto(body.message, areas_reais)
+    
+    if nova_area:
+        area_atual = nova_area
+        session["area_atual"] = area_atual # Salva na sessão do usuário
+    
+    logger.info(f"📢 Respondendo usando base de: {area_atual}")
+
     async def event_stream():
-        def sse(d: dict) -> str: return f"data: {json.dumps(d)}\n\n"
+        def sse(d): return f"data: {json.dumps(d)}\n\n"
         try:
             yield sse({"type": "start"})
-            await asyncio.sleep(0.1)
-
-            engine = _get_engine()
-            if not engine:
-                yield sse({"type": "error", "content": "Sistema em manutenção."})
-                return
-
+            
+            # Carrega o motor específico da área (com cache)
+            if area_atual not in _motores_cache:
+                motor = carregar_motor_especifico(area_atual)
+                if motor:
+                    _motores_cache[area_atual] = motor
+                else:
+                    # Se não tiver motor para a área (ex: primeira vez ou pasta vazia)
+                    yield sse({"type": "chunk", "content": f"Ainda não tenho materiais indexados para a área de **{area_atual}**. Por favor, adicione PDFs na pasta correspondente."})
+                    yield sse({"type": "complete"})
+                    return
+            
+            engine = _motores_cache[area_atual]
+            
+            # Executa a IA em Thread separada
             res = await asyncio.to_thread(engine.invoke, {"question": body.message, "chat_history": []})
             
-            # Prepara Referências bibliográficas (Sidebar Direita)
+            # Processa fontes
             fontes = []
-            docs = res.get("source_documents", [])
-            for i, doc in enumerate(docs):
-                nome = os.path.basename(doc.metadata.get("source", "PDF"))
-                pag = int(doc.metadata.get("page", 0)) + 1
+            for doc in res.get("source_documents", []):
                 fontes.append({
-                    "source": f"{nome} (Pág. {pag})",
-                    "content": html.escape(doc.page_content[:400])
+                    "source": os.path.basename(doc.metadata.get("source", "Doc")),
+                    "content": html.escape(doc.page_content[:300])
                 })
             
-            if fontes:
-                yield sse({"type": "source_chunks", "content": fontes})
-
+            if fontes: yield sse({"type": "source_chunks", "content": fontes})
             yield sse({"type": "chunk", "content": res.get("answer", "")})
             yield sse({"type": "complete"})
 
         except Exception as e:
-            logger.error(f"Erro Stream: {e}")
-            yield sse({"type": "error", "content": "Falha no processamento."})
+            logger.error(f"Erro: {e}")
+            yield sse({"type": "error", "content": "Erro ao processar sua dúvida."})
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")

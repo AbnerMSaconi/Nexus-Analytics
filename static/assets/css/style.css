@@ -1,4 +1,4 @@
-/* UCDB-IA | Design Limpo e Focado (Sidebars Off-Canvas) */
+/* UCDB-IA | Layout Estilo Mensageiro (WhatsApp-like) */
 
 :root {
     --bg-deep: #0f172a;
@@ -7,399 +7,137 @@
     --text-main: #f1f5f9;
     --text-muted: #94a3b8;
     --border: rgba(255, 255, 255, 0.1);
-    --max-chat-width: 800px;
-    --header-height: 60px;
-    --sidebar-width: 320px;
-    --transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    --sidebar-w: 300px;
+    --header-h: 60px;
+    --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    
+    /* Configuração do "Trilho" do Chat */
+    --chat-track-width: 800px; 
 }
 
-* {
-    margin: 0;
-    padding: 0;
-    box-sizing: border-box;
-}
+* { margin: 0; padding: 0; box-sizing: border-box; }
 
 body {
     font-family: 'Inter', sans-serif;
     background-color: var(--bg-deep);
     color: var(--text-main);
     height: 100vh;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
+    display: flex; flex-direction: column; overflow: hidden;
 }
 
 /* --- Estados Iniciais --- */
-/* Esconde tudo na Home, exceto a própria Home */
-body.estado-inicial .header,
-body.estado-inicial .camada-lateral,
-body.estado-inicial .caixa-entrada-fixa,
-body.estado-inicial #fluxo-conversa {
-    display: none !important;
-}
-
-body:not(.estado-inicial) .welcome-container {
-    display: none !important;
-}
+body.estado-inicial .header, 
+body.estado-inicial .camada-lateral, 
+body.estado-inicial .caixa-entrada-fixa, 
+body.estado-inicial #fluxo-conversa { display: none !important; }
+body:not(.estado-inicial) .welcome-container { display: none !important; }
 
 /* --- Header --- */
 .header {
-    height: var(--header-height);
+    height: var(--header-h);
     background: rgba(15, 23, 42, 0.98);
-    /* Mais opaco para cobrir scroll */
     border-bottom: 1px solid var(--border);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0 1.5rem;
-    z-index: 2000;
-    /* Acima de tudo */
-    position: relative;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 1.5rem; z-index: 20; flex-shrink: 0;
 }
-
 .acao-interface {
-    background: transparent;
-    border: 1px solid var(--border);
-    color: var(--text-main);
-    width: 40px;
-    height: 40px;
-    border-radius: 8px;
-    cursor: pointer;
-    transition: 0.2s;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    background: transparent; border: 1px solid var(--border); color: var(--text-main);
+    width: 40px; height: 40px; border-radius: 8px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; transition: 0.2s;
 }
-
-.acao-interface:hover,
-.acao-interface.ativo {
-    background: var(--accent);
-    border-color: var(--accent);
-    color: white;
-}
+.acao-interface:hover, .acao-interface.ativo { background: var(--accent); border-color: var(--accent); color: white; }
 
 /* --- Container Principal --- */
 .container-principal {
-    display: flex;
-    flex: 1;
-    position: relative;
-    /* Necessário para posicionar sidebars absolutas */
-    overflow: hidden;
-}
-
-/* --- SIDEBARS FLUTUANTES (GAVETAS) --- */
-.camada-lateral {
-    position: absolute;
-    /* Flutua sobre o chat, não empurra */
-    top: 0;
-    bottom: 0;
-    width: var(--sidebar-width);
-    background: var(--bg-panel);
-    z-index: 1500;
-    /* Acima do chat, abaixo do header */
-    display: flex;
-    flex-direction: column;
-    transition: var(--transition);
-    box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
-    /* Sombra para profundidade */
-}
-
-/* Configuração Esquerda (Materiais) */
-.esquerda {
-    left: 0;
-    border-right: 1px solid var(--border);
-    transform: translateX(-100%);
-    /* Escondida à esquerda por padrão */
-}
-
-/* Configuração Direita (Referências) */
-.direita {
-    right: 0;
-    border-left: 1px solid var(--border);
-    transform: translateX(100%);
-    /* Escondida à direita por padrão */
-}
-
-/* Classe ativadora via JS */
-.visivel {
-    transform: translateX(0);
-    /* Traz para a tela */
-}
-
-.header-lateral {
-    padding: 1.2rem;
-    border-bottom: 1px solid var(--border);
-    background: rgba(0, 0, 0, 0.2);
-}
-
-.header-lateral h2 {
-    font-size: 0.9rem;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    color: var(--accent);
-}
-
-.scroll-content {
-    flex: 1;
-    overflow-y: auto;
-    padding: 1rem;
-}
-
-/* Blocos e Cards (Visual) */
-.sidebar-block {
-    margin-bottom: 1rem;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.02);
-    overflow: hidden;
-}
-
-.block-header {
-    padding: 10px;
-    background: rgba(255, 255, 255, 0.05);
-    font-weight: bold;
-    font-size: 0.85rem;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.block-list li {
-    padding: 8px 10px;
-    font-size: 0.8rem;
-    border-top: 1px solid rgba(255, 255, 255, 0.02);
-    color: var(--text-muted);
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.block-list li:hover {
-    background: rgba(59, 130, 246, 0.1);
-    color: white;
-}
-
-.source-chunk {
-    background: #111827;
-    border: 1px solid var(--accent);
-    border-radius: 8px;
-    padding: 12px;
-    margin-bottom: 12px;
-    font-size: 0.85rem;
-    border-left: 4px solid var(--accent);
-}
-
-.source-chunk strong {
-    display: block;
-    margin-bottom: 5px;
-    color: var(--accent);
-    font-size: 0.75rem;
-}
-
-.source-chunk p {
-    color: #cbd5e1;
-    font-style: italic;
+    display: flex; flex: 1; width: 100%; position: relative; overflow: hidden;
 }
 
 /* --- ÁREA CENTRAL (CHAT) --- */
 .envolvedor-fluxo {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    position: relative;
-    width: 100%;
-    /* Garante que ocupe tudo */
+    flex: 1; display: flex; flex-direction: column; position: relative;
+    background: var(--bg-deep); min-width: 0;
 }
 
 .area-conversa {
-    flex: 1;
-    overflow-y: auto;
-    padding: 2rem;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 20px;
+    flex: 1; overflow-y: auto; padding: 2rem 1rem;
+    display: flex; flex-direction: column; 
+    align-items: center; /* Centraliza o TRILHO, não o texto */
+    gap: 15px; /* Espaço entre mensagens */
     padding-bottom: 100px;
 }
 
-.msg {
-    max-width: 800px;
+/* --- ESTRUTURA DA MENSAGEM (O TRILHO) --- */
+/* Cada mensagem é uma linha invisível que ocupa no máx 800px */
+.chat-row {
     width: 100%;
-    padding: 1.2rem;
-    border-radius: 12px;
-    line-height: 1.6;
+    max-width: var(--chat-track-width);
+    display: flex;
 }
 
-.usuario {
-    align-self: flex-end;
-    width: fit-content;
-    max-width: 60%;
+/* Alinhamentos dentro do trilho */
+.chat-row.user { justify-content: flex-end; } /* Joga pra direita do trilho */
+.chat-row.bot { justify-content: flex-start; } /* Joga pra esquerda do trilho */
+
+/* --- A BOLHA VISUAL --- */
+.msg-bubble {
+    padding: 1rem 1.2rem;
+    border-radius: 18px;
+    line-height: 1.6;
+    font-size: 1rem;
+    position: relative;
+    max-width: 85%; /* A bolha nunca ocupa 100% da linha */
+    word-wrap: break-word;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+}
+
+.msg-bubble.usuario {
     background: var(--accent);
     color: white;
-    border-bottom-right-radius: 2px;
+    border-bottom-right-radius: 4px; /* Ponta do balão */
 }
 
-.bot {
-    align-self: center;
+.msg-bubble.bot {
     background: rgba(255, 255, 255, 0.05);
     border: 1px solid var(--border);
-    border-bottom-left-radius: 2px;
+    border-bottom-left-radius: 4px; /* Ponta do balão */
 }
 
-/* Input */
-.caixa-entrada-fixa {
-    position: absolute;
-    bottom: 20px;
-    width: 100%;
-    display: flex;
-    justify-content: center;
-    z-index: 1000;
-    padding: 0 20px;
-    pointer-events: none;
-    /* Deixa clicar através da área vazia */
-    border-radius: 24px;
-    /* Arredondamento */
-    padding: 12px 20px;
-    /* Ajuste leve no padding */
-    align-items: center;
-    transition: border-color 0.3s;
+/* --- SIDEBARS --- */
+.camada-lateral {
+    width: 0; opacity: 0; background: var(--bg-panel); display: flex; flex-direction: column;
+    transition: var(--transition); overflow: hidden; flex-shrink: 0; white-space: nowrap; z-index: 10;
+}
+.camada-lateral.visivel { width: var(--sidebar-w); opacity: 1; }
+.esquerda { border-right: 0 solid var(--border); } .direita { border-left: 0 solid var(--border); }
+.esquerda.visivel { border-right-width: 1px; } .direita.visivel { border-left-width: 1px; }
+
+.header-lateral { padding: 1.2rem; border-bottom: 1px solid var(--border); background: rgba(0,0,0,0.2); }
+.header-lateral h2 { font-size: 0.9rem; text-transform: uppercase; color: var(--accent); }
+.sidebar-block { margin-bottom: 1rem; border: 1px solid var(--border); border-radius: 8px; background: rgba(255,255,255,0.02); }
+.block-header { padding: 10px; background: rgba(255,255,255,0.05); font-weight: bold; font-size: 0.85rem; display: flex; align-items: center; gap: 8px; }
+.block-list li { padding: 8px 10px; font-size: 0.8rem; border-top: 1px solid rgba(255,255,255,0.02); color: var(--text-muted); cursor: pointer; display: flex; align-items: center; gap: 8px; }
+.source-chunk { background: #111827; border: 1px solid var(--accent); border-radius: 8px; padding: 12px; margin-bottom: 12px; font-size: 0.85rem; border-left: 4px solid var(--accent); white-space: normal; }
+.source-chunk strong { display: block; margin-bottom: 5px; color: var(--accent); font-size: 0.75rem; }
+.source-chunk p { color: #cbd5e1; font-style: italic; }
+
+/* --- Mobile --- */
+@media (max-width: 1000px) {
+    .camada-lateral { position: absolute; height: 100%; top: 0; bottom: 0; width: 80% !important; max-width: 350px; transform: translateX(-100%); width: 80%; }
+    .direita { right: 0; transform: translateX(100%); }
+    .camada-lateral.visivel { transform: translateX(0); }
 }
 
-.entrada-wrapper {
-    pointer-events: auto;
-    width: 100%;
-    display: flex;
-    max-width: 800px;
-    background: #1e293b;
-    border: 1px solid var(--border);
-    align-items: flex-end;
-    box-shadow: 0 -5px 20px rgba(0, 0, 0, 0.3);
-    border-radius: 24px;
-    /* Arredondamento */
-    padding: 12px 20px;
-    /* Ajuste leve no padding */
-    align-items: center;
-    transition: border-color 0.3s;
-}
+/* --- Inputs e Hero --- */
+.caixa-entrada-fixa { position: absolute; bottom: 20px; width: 100%; display: flex; justify-content: center; z-index: 15; padding: 0 20px; pointer-events: none; }
+.entrada-wrapper { pointer-events: auto; width: 100%; max-width: var(--chat-track-width); background: #1e293b; border: 1px solid var(--border); border-radius: 20px; padding: 12px 20px; display: flex; align-items: center; box-shadow: 0 -5px 20px rgba(0,0,0,0.3); }
+#entrada-usuario { flex: 1; background: transparent; border: none; color: white; resize: none; outline: none; height: 24px; font-size: 1rem; line-height: 1.5; padding: 0; }
+#btn-enviar { background: transparent; border: none; color: var(--accent); font-size: 1.3rem; cursor: pointer; padding-left: 10px; display: flex; align-items: center; height: 100%; }
 
-.entrada-wrapper:focus-within {
-    border-color: var(--accent);
-}
-
-#entrada-usuario {
-    flex: 1;
-    background: transparent;
-    border: none;
-    color: white;
-    resize: none;
-    outline: none;
-    max-height: 150px;
-    font-size: 1rem;
-    padding: 0;
-    /* Remove padding interno nativo do textarea para alinhar melhor */
-    height: 24px;
-    /* Altura inicial fixa para garantir centro perfeito */
-    line-height: 1.5;
-    /* Altura de linha confortável */
-}
-
-#btn-enviar {
-    background: transparent;
-    border: none;
-    color: var(--accent);
-    font-size: 1.2rem;
-    cursor: pointer;
-    padding-left: 10px;
-    padding-bottom: 5px;
-}
-
-/* Hero da Home */
-.welcome-container {
-    flex: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: radial-gradient(circle, #1e293b 0%, #0f172a 100%);
-}
-
-.hero-section {
-    text-align: center;
-    max-width: 800px;
-    width: 90%;
-}
-
-.hero-section h2 {
-    font-size: 2.5rem;
-    margin-bottom: 2rem;
-}
-
-.caixa-entrada-gigante {
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid var(--border);
-    border-radius: 25px;
-    width: auto;
-    padding: 3.33%;
-    display: flex;
-    gap: 10px;
-    margin-bottom: 2rem;
-    transition: border-color 0.3s;
-    transition: background-color 0.3s;
-}
-.caixa-entrada-gigante:focus-within {
-    border-color: var(--accent);
-    background-color:#111827;
-}
-
-#entrada-inicial {
-    flex: 1;
-    background: transparent;
-    border: none;
-    color: white;
-    font-size: 1.2rem;
-    resize: none;
-    outline: none;
-}
-
-#btn-enviar-inicial {
-    background: transparent;
-    width: 50px;
-    height: 50px;
-    border-radius: 12px;
-    border: none;
-    color:#3b82f6;
-    cursor: pointer;
-    font-size: 1.2rem;
-}
-
-.titulo-especialidades {
-    color: var(--text-main);
-    font-size: 1.2rem;
-    margin-bottom: 1rem;
-}
-.grade-especialistas {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 10px;
-}
-
-.card-area {
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid var(--border);
-    padding: 0.5rem;
-    border-radius: 25px;
-    cursor: pointer;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 0.5rem;
-    transition: 0.3s;
-    color: white;
-    width: 75%;
-}
-
-.card-area:hover {
-    border-color: var(--accent);
-    background: rgba(59, 130, 246, 0.1);
-    transform: translateY(-3px);
-}
+.welcome-container { flex: 1; display: flex; align-items: center; justify-content: center; background: radial-gradient(circle, #1e293b 0%, #0f172a 100%); }
+.hero-section { text-align: center; max-width: 800px; width: 90%; }
+.hero-section h2 { font-size: 2.5rem; margin-bottom: 2rem; }
+.caixa-entrada-gigante { background: rgba(255,255,255,0.05); border: 1px solid var(--border); border-radius: 24px; padding: 1.5rem; display: flex; gap: 10px; margin-bottom: 2rem; }
+#entrada-inicial { flex: 1; background: transparent; border: none; color: white; font-size: 1.2rem; resize: none; outline: none; }
+#btn-enviar-inicial { background: var(--accent); width: 50px; height: 50px; border-radius: 12px; border: none; color: white; cursor: pointer; font-size: 1.2rem; }
+.grade-especialistas { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.card-area { background: rgba(255,255,255,0.05); border: 1px solid var(--border); padding: 1.5rem; border-radius: 12px; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 10px; color: white; }
