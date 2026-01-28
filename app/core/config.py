@@ -1,7 +1,6 @@
-# app/core/config.py - Versão com Penalidade de Repetição Aumentada
-
+# app/core/config.py
 from pydantic_settings import SettingsConfigDict, BaseSettings
-from pydantic import DirectoryPath, AnyHttpUrl
+from pydantic import AnyHttpUrl
 import os
 import secrets
 
@@ -16,14 +15,35 @@ class Settings(BaseSettings):
     LLM_BASE_URL: AnyHttpUrl = "http://localhost:8080/v1"
     EMBEDDING_API_URL: AnyHttpUrl = "http://localhost:8081/embedding"
     MAX_TOKENS: int = 15500
-    TEMPERATURE: float = 0.85  # Reduzir um pouco a temperatura pode ajudar na consistência
+    TEMPERATURE: float = 0.85
     TOP_P: float = 0.9
-    REPETITION_PENALTY: float = 1  # <-- PREVENIR LOOPS
+    REPETITION_PENALTY: float = 1
 
     # RAG
     CHUNK_SIZE: int = 812
     CHUNK_OVERLAP: int = 64
-    RETRIEVAL_K: int = 7 # Aumentar ligeiramente para mais contexto
+    RETRIEVAL_K: int = 7
+
+    # --- CONFIGURAÇÃO DE MODELOS LOCAIS ---
+    # Diretório onde os arquivos .gguf estão localizados
+    MODELS_DIR: str = os.path.expanduser("~/.cache/llama.cpp")
+
+    # Comando para iniciar o Qwen Embeddings (Porta 8081)
+    CMD_EMBEDDING: list = [
+        "llama-server",
+        "-m", "Qwen_Qwen3-Embedding-0.6B-GGUF_Qwen3-Embedding-0.6B-Q8_0.gguf",
+        "--embedding",
+        "--port", "8081"
+    ]
+
+    # Comando para iniciar o GLM LLM (Porta 8080)
+    CMD_LLM: list = [
+        "llama-server",
+        "-m", "unsloth_GLM-4-9B-0414-GGUF_GLM-4-9B-0414-Q4_K_M.gguf",
+        "--port", "8080",
+        "-fa", "1",
+        "-ngl", "100"
+    ]
 
     # Paths
     BASE_DIR: str = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
