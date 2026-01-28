@@ -1,16 +1,41 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from app.api.routes import router # Importação corrigida
+from app.api.routes import router
 from starlette.middleware.sessions import SessionMiddleware
 from app.utils.logger import setup_logging, logger
 from app.core.config import settings
 import os
 from app.core.rag import inicializar_bases_de_conhecimento
+from contextlib import asynccontextmanager # <--- 1. Nova importação necessária
+
+# 2. Definir a função lifespan (gerencia o ciclo de vida da aplicação)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # --- Lógica de Startup (Início) ---
+    logger.info("🌐 UCDB Chat iniciado!")
+    
+    # (A chamada incorreta para _get_engine() foi removida daqui)
+
+    try:
+        # Varre as pastas e cria os índices separados
+        inicializar_bases_de_conhecimento()
+    except Exception as e:
+        logger.warning(f"⚠️ Erro na indexação inicial: {e}")
+    
+    logger.info(f"💡 Servidor rodando em http://localhost:8000")
+    
+    yield # O ponto onde a aplicação roda e atende requisições
+    
+    # --- Lógica de Shutdown (Desligamento) ---
+    # Se precisar limpar recursos ao fechar o servidor, coloque aqui.
+    logger.info("🛑 UCDB Chat finalizando...")
 
 def create_app() -> FastAPI:
     setup_logging()
-    app = FastAPI(title="UCDB Chat")
+    
+    # 3. Passar o parâmetro lifespan na criação do app
+    app = FastAPI(title="UCDB Chat", lifespan=lifespan)
 
     app.add_middleware(SessionMiddleware, secret_key=settings.SECRET_KEY)
     app.add_middleware(
@@ -30,24 +55,9 @@ def create_app() -> FastAPI:
     pdf_dir = settings.pdf_path
     os.makedirs(pdf_dir, exist_ok=True)
     app.mount("/pdfs", StaticFiles(directory=pdf_dir), name="pdfs")
-
-    @app.on_event("startup")
-    def startup():
-        """Função executada no início da aplicação."""
-        logger.info("🌐 UCDB Chat iniciado!")
-        try:
-            # Chama o motor de inferência para carregar os modelos e PDFs no arranque
-            _get_engine()
-        except Exception as e:
-            logger.warning(f"⚠️ Falha na pré-inicialização do motor no startup: {e}")
-        try:
-            # Varre as pastas e cria os índices separados
-            inicializar_bases_de_conhecimento()
-        except Exception as e:
-            logger.warning(f"⚠️ Erro na indexação inicial: {e}")
-        
-        logger.info(f"💡 Servidor rodando em http://localhost:8000")
     
+    # (O bloco antigo @app.on_event("startup") foi removido)
+
     return app
 
 app = create_app()
