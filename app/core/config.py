@@ -41,8 +41,7 @@ class Settings(BaseSettings):
         "llama-server",
         "-m", "unsloth_GLM-4-9B-0414-GGUF_GLM-4-9B-0414-Q4_K_M.gguf",
         "--port", "8080",
-        "-fa", "1",
-        "-ngl", "100"
+        "-fa", "1"
     ]
 
     # Paths

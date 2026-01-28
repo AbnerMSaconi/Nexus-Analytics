@@ -1,15 +1,15 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from app.api.routes import router
 from starlette.middleware.sessions import SessionMiddleware
+# ATENÇÃO: Importamos _initialize_rag daqui, não do rag.py
+from app.api.routes import router, _initialize_rag 
 from app.utils.logger import setup_logging, logger
 from app.core.config import settings
 import os
 import socket
 import subprocess
 import time
-from app.core.rag import inicializar_bases_de_conhecimento
 from contextlib import asynccontextmanager
 
 # Lista para armazenar processos iniciados e matá-los ao encerrar o app
@@ -37,37 +37,39 @@ def iniciar_servico_se_necessario(nome: str, porta: int, comando: list, pergunta
             if resposta in ['s', 'sim', 'y', 'yes']:
                 logger.info(f"🚀 Iniciando {nome}...")
                 
-                # Inicia o processo no diretório configurado (~/.cache/llama.cpp)
+                if not os.path.exists(settings.MODELS_DIR):
+                    logger.error(f"❌ Diretório dos modelos não encontrado: {settings.MODELS_DIR}")
+                    break
+
                 proc = subprocess.Popen(
                     comando,
                     cwd=settings.MODELS_DIR,
-                    stdout=subprocess.DEVNULL, # Oculta logs do llama-server para não poluir
-                    stderr=subprocess.DEVNULL  # Mude para subprocess.PIPE se quiser ver erros
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
                 )
                 _processos_locais.append(proc)
                 
-                # Aguarda um pouco para o servidor subir
                 logger.info("⏳ Aguardando inicialização...")
                 time.sleep(3) 
                 
                 if verificar_porta(host, porta):
                     logger.info(f"✅ {nome} iniciado com sucesso!")
                 else:
-                    logger.warning(f"⚠️ {nome} foi iniciado, mas a porta ainda não respondeu. Pode levar alguns segundos.")
+                    logger.warning(f"⚠️ {nome} iniciado, mas a porta ainda não respondeu. Aguarde...")
                 break
             elif resposta in ['n', 'nao', 'no']:
-                logger.info(f"Mantis serviço {nome} desligado.")
+                logger.info(f"Mantendo serviço {nome} desligado.")
                 break
-        except EOFError:
-            # Caso esteja rodando em ambiente sem input (ex: docker background)
+        except (EOFError, OSError):
+            logger.warning("Input não disponível. Pulando inicialização automática.")
             break
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # --- Startup ---
+    # --- STARTUP ---
     logger.info("🌐 UCDB Chat iniciado!")
     
-    # 1. Verificar e oferecer inicialização do Embeddings (Porta 8081)
+    # 1. Verificar Embeddings (8081)
     iniciar_servico_se_necessario(
         nome="Modelo Embeddings (Qwen3)",
         porta=8081,
@@ -75,7 +77,7 @@ async def lifespan(app: FastAPI):
         pergunta="Modelo embeddings não iniciado. Deseja iniciar o Qwen3 Embeddings?"
     )
 
-    # 2. Verificar e oferecer inicialização do LLM (Porta 8080)
+    # 2. Verificar LLM (8080)
     iniciar_servico_se_necessario(
         nome="Modelo LLM (GLM-4)",
         porta=8080,
@@ -83,23 +85,26 @@ async def lifespan(app: FastAPI):
         pergunta="Modelo LLM não iniciado. Deseja iniciar o GLM-4?"
     )
 
+    # 3. Inicializar RAG (Usando a nova função do routes.py)
     try:
-        # Varre as pastas e cria os índices separados
-        inicializar_bases_de_conhecimento()
+        _initialize_rag()
     except Exception as e:
-        logger.warning(f"⚠️ Erro na indexação inicial: {e}")
+        logger.warning(f"⚠️ Falha na inicialização do RAG: {e}")
     
     logger.info(f"💡 Servidor rodando em http://localhost:8000")
     
-    yield # Servidor roda aqui
+    yield
     
-    # --- Shutdown ---
+    # --- SHUTDOWN ---
     logger.info("🛑 UCDB Chat finalizando...")
     if _processos_locais:
-        logger.info("🔪 Encerrando modelos locais iniciados...")
+        logger.info("🔪 Encerrando modelos locais...")
         for proc in _processos_locais:
-            proc.terminate()
-            proc.wait()
+            try:
+                proc.terminate()
+                proc.wait(timeout=5)
+            except Exception:
+                proc.kill()
 
 def create_app() -> FastAPI:
     setup_logging()
@@ -130,5 +135,4 @@ app = create_app()
 
 if __name__ == "__main__":
     import uvicorn
-    # Importante: workers=1 para garantir que o input() funcione e não haja conflito de portas
     uvicorn.run(app, host="0.0.0.0", port=8000)
