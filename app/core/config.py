@@ -11,47 +11,44 @@ class Settings(BaseSettings):
     DEBUG: bool = False
     SECRET_KEY: str = secrets.token_hex(32)
 
-    # LLM
+    # SERVIÇOS
     LLM_BASE_URL: AnyHttpUrl = "http://localhost:8080/v1"
     EMBEDDING_API_URL: AnyHttpUrl = "http://localhost:8081/embedding"
-    MAX_TOKENS: int = 15500
-    TEMPERATURE: float = 0.85
-    TOP_P: float = 0.9
-    REPETITION_PENALTY: float = 1
+    
+    # PARAMETROS DO MODELO (Hermes 3)
+    MAX_TOKENS: int = 8192      
+    TEMPERATURE: float = 0.3    # Hermes é criativo, 0.3 segura alucinações
+    TOP_P: float = 0.90
+    REPETITION_PENALTY: float = 1.05 # Llama 3.1 repete menos, penalidade leve
 
     # RAG
-    CHUNK_SIZE: int = 812
-    CHUNK_OVERLAP: int = 64
-    RETRIEVAL_K: int = 7
+    CHUNK_SIZE: int = 250      
+    CHUNK_OVERLAP: int = 100
+    RETRIEVAL_K: int = 5        
 
-    # --- CONFIGURAÇÃO DE MODELOS LOCAIS ---
-    # Diretório onde os arquivos .gguf estão localizados
-    MODELS_DIR: str = os.path.expanduser("~/.cache/llama.cpp")
-
-    # Comando para iniciar o Qwen Embeddings (Porta 8081)
-    CMD_EMBEDDING: list = [
-        "llama-server",
-        "-m", "Qwen_Qwen3-Embedding-0.6B-GGUF_Qwen3-Embedding-0.6B-Q8_0.gguf",
-        "--embedding",
-        "--port", "8081"
-    ]
-
-    # Comando para iniciar o GLM LLM (Porta 8080)
-    CMD_LLM: list = [
-        "llama-server",
-        "-m", "unsloth_GLM-4-9B-0414-GGUF_GLM-4-9B-0414-Q4_K_M.gguf",
-        "--port", "8080",
-        "-fa", "1"
-    ]
-
-    # Paths
+    # CAMINHOS
     BASE_DIR: str = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    # Garanta que este caminho é onde você salvou o arquivo .gguf
+    MODELS_DIR: str = os.path.expanduser("~/.cache/llama.cpp")
     
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        case_sensitive=False,
-        extra="ignore"
-    )
+    # MODELO DE EMBEDDING (Mantém o Qwen, é ótimo)
+    CMD_EMBEDDING: list = [
+        "llama-server", "-m", "Qwen_Qwen3-Embedding-0.6B-GGUF_Qwen3-Embedding-0.6B-Q8_0.gguf",
+        "--embedding", "--port", "8081"
+    ]
+
+    # NOVO MODELO LLM (Hermes 3 - Llama 3.1)
+    # Substitua 'Hermes-3-Llama-3.1-8B.Q4_K_M.gguf' pelo nome exato do arquivo que você baixou
+    CMD_LLM: list = [
+        "llama-server", 
+        "-m", "NousResearch_Hermes-3-Llama-3.1-8B-GGUF_Hermes-3-Llama-3.1-8B.Q4_K_M.gguf", 
+        "--port", "8080", 
+        "-fa", "1",       # Flash Attention (essencial para Llama 3)
+        "-c", "8192",     # Contexto
+        "-ngl", "99"      # GPU Offload máximo
+    ]
+    
+    model_config = SettingsConfigDict(env_file=".env", case_sensitive=False, extra="ignore")
 
     @property
     def vectorstore_path(self) -> str:

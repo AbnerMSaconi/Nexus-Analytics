@@ -5,11 +5,21 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>UCDB-IA | Portal Acadêmico</title>
-    <link rel="stylesheet" href="/static/assets/css/style.css">
+    <link rel="stylesheet" href="/static/assets/css/style.css?v=2.0">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/marked/lib/marked.umd.js"></script>
+    
     <script>
-        window.MathJax = { tex: { inlineMath: [['$', '$']] }, svg: { fontCache: 'global' } };
+        window.MathJax = {
+            tex: {
+                inlineMath: [['$', '$'], ['\\(', '\\)']],
+                displayMath: [['$$', '$$'], ['\\[', '\\]']],
+                processEscapes: true
+            },
+            svg: {
+                fontCache: 'global'
+            }
+        };
     </script>
     <script type="text/javascript" id="MathJax-script" async
         src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
@@ -37,16 +47,17 @@
 
             <div id="tela-boas-vindas" class="welcome-container">
                 <div class="hero-section">
-                    <h2>O que você deseja aprender hoje?</h2>
+                    <h2 id="titulo-boas-vindas">O que você deseja aprender hoje?</h2>
 
                     <div class="caixa-entrada-gigante">
-                        <textarea id="entrada-inicial" placeholder="Digite sua dúvida acadêmica..." rows="1"></textarea>
-                        <button id="btn-enviar-inicial"><i class="fa-solid fa-paper-plane"></i></button>
+                        <textarea id="entrada-inicial" placeholder="Qual sua dúvida acadêmica?" rows="1"></textarea>
+                        <button id="btn-enviar-inicial" type="button"><i class="fa-solid fa-paper-plane"></i></button>
                     </div>
-                    <div class="titulo-especialidades"> Ou escolha a área de conhecimento por onde quer começar 
+                    
+                    <div id="area-botoes" class="titulo-especialidades"> 
+                        Ou escolha a área de conhecimento por onde quer começar 
                         <br><br>
                         <div class="grade-especialistas">
-
                             <button class="card-area" data-area="Engenharias">
                                 <i class="fas fa-microchip"></i><span>Engenharias</span>
                             </button>
@@ -70,7 +81,7 @@
             <footer id="input-persistente" class="caixa-entrada-fixa">
                 <div class="entrada-wrapper">
                     <textarea id="entrada-usuario" placeholder="Continue sua dúvida..." rows="1"></textarea>
-                    <button id="btn-enviar"><i class="fa-solid fa-paper-plane"></i></button>
+                    <button id="btn-enviar" type="button"><i class="fa-solid fa-paper-plane"></i></button>
                 </div>
             </footer>
 
@@ -87,7 +98,7 @@
 
     </main>
 
-    <script type="module" src="/static/assets/js/script.js"></script>
+   <div id="overlay-mobile" class="sidebar-overlay"></div>
+     <script type="module" src="/static/assets/js/script.js?v=6.0"></script>
 </body>
-
 </html>
