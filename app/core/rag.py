@@ -46,7 +46,6 @@ def carregar_indices():
     global _chains_cache
     index_path = "storage_indexes"
     
-    # Adicionei tratamento de erro aqui caso embeddings falhem na v1
     try:
         embeddings = get_embeddings()
         llm = get_llm()
@@ -58,6 +57,7 @@ def carregar_indices():
         logger.error(f"❌ Pasta {index_path} não encontrada. Execute ingest_multiplo.py primeiro.")
         return {}
 
+    # 1. Prompt alinhado com a chave "input"
     prompt = ChatPromptTemplate.from_messages([
         ("system", SYSTEM_TEMPLATE),
         ("human", "{input}"),
@@ -68,7 +68,6 @@ def carregar_indices():
     for item in os.listdir(index_path):
         caminho_area = os.path.join(index_path, item)
         if os.path.isdir(caminho_area):
-            # Filtra apenas pastas que parecem índices
             if not item.startswith("index_") and "index" not in item:
                 continue
 
@@ -81,10 +80,17 @@ def carregar_indices():
                     allow_dangerous_deserialization=True
                 )
                 
+                # Retrieve mais robusto
                 retriever = vectorstore.as_retriever(search_kwargs={"k": 4})
                 
-                # Criação das chains usando os imports corrigidos
-                combine_docs_chain = create_stuff_documents_chain(llm, prompt)
+                # 2. Criação da Chain com ligação explícita do Contexto
+                combine_docs_chain = create_stuff_documents_chain(
+                    llm, 
+                    prompt,
+                    document_variable_name="context"  # <--- ISSO É CRUCIAL
+                )
+                
+                # 3. Chain final que injeta 'context' automaticamente
                 rag_chain = create_retrieval_chain(retriever, combine_docs_chain)
                 
                 loaded_chains[nome_area] = rag_chain
@@ -100,6 +106,3 @@ def carregar_indices():
         _chains_cache["geral"] = loaded_chains[primeira_chave]
 
     return _chains_cache
-
-def get_rag_chain(area: str):
-    return _chains_cache.get(area) or _chains_cache.get(area.lower())

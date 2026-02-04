@@ -37,7 +37,7 @@ class LlamaServerLLM(LLM):
             # logger.debug(f"Enviando para LLM: {payload}")
 
             response = requests.post(
-                f"{settings.LLM_BASE_URL}/completions",
+                f"{settings.LLM_BASE_URL}/completions", # Endpoint legado, mas funciona se o prompt for string
                 json=payload,
                 timeout=120
             )
