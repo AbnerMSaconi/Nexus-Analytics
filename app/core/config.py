@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     
     # MODELO DE EMBEDDING (Mantém o Qwen, é ótimo)
     CMD_EMBEDDING: list = [
-        "llama-server", "-m", "Qwen_Qwen3-Embedding-0.6B-GGUF_Qwen3-Embedding-0.6B-Q8_0.gguf",
+        "llama-server", "-hf", "Qwen/Qwen3-Embedding-0.6B-GGUF:Q8_0",
         "--embedding", "--port", "8081"
     ]
 
@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     # Substitua 'Hermes-3-Llama-3.1-8B.Q4_K_M.gguf' pelo nome exato do arquivo que você baixou
     CMD_LLM: list = [
         "llama-server", 
-        "-m", "NousResearch_Hermes-3-Llama-3.1-8B-GGUF_Hermes-3-Llama-3.1-8B.Q4_K_M.gguf", 
+        "-hf", "NousResearch/Hermes-3-Llama-3.1-8B-GGUF:Q4_K_M", 
         "--port", "8080", 
         "-fa", "1",       # Flash Attention (essencial para Llama 3)
         "-c", "8192",     # Contexto
