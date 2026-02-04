@@ -85,7 +85,7 @@ async def chat(request: Request, body: ChatRequest):
 
             # O input do invoke/stream depende de como o chain foi criado no rag.py.
             # Geralmente ConversationalRetrievalChain aceita "question" e "chat_history"
-            async for chunk in chain.astream({"input": body.message, "chat_history": chat_history}):
+            async for chunk in chain.astream({"question": body.message, "chat_history": chat_history}):
                 
                 # Captura trechos da resposta (Answer)
                 if "answer" in chunk:
