@@ -1,2 +1,2 @@
- llama-server -hf NousResearch/Hermes-3-Llama-3.1-8B-GGUF:Q4_K_M --port 8080 -fa 1 -c 8192 -ngl 100
- llama-server -hf Qwen/Qwen3-Embedding-0.6B-GGUF:Q8_0 --port 8081 --embedding -ngl 100
+ llama-server -m NousResearch/Hermes-3-Llama-3.1-8B-GGUF:Q4_K_M --port 8080 -fa 1 -c 8192 -ngl 99
+ llama-server -m Qwen/Qwen3-Embedding-0.6B-GGUF:Q8_0 --port 8081 --embedding

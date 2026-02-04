@@ -10,33 +10,42 @@ import uuid
 import asyncio
 import re
 
-# IMPORTANTE: Importando da nova estrutura do rag.py
-from app.core.rag import carregar_indices, get_rag_chain
-
 router = APIRouter()
 
+_vectorstore = None
+_rag_chain = None
 _initialized = False
 
+# Limpa artefatos que o modelo possa gerar
 def _limpar_resposta(texto: str) -> str:
-    # Mantém sua lógica de limpeza, vital para modelos ChatML/Hermes
-    texto = re.sub(r'<\|im_start\|>.*?(\n|$)', '', texto)
-    texto = re.sub(r'<\|im_end\|>', '', texto)
+    # Remove tags ChatML e outros artefatos
+    texto = re.sub(r'<\|im_start\|>.*?(\n|$)', '', texto) # Remove cabeçalhos im_start
+    texto = re.sub(r'<\|im_end\|>', '', texto)           # Remove im_end
+    # Remove rótulos comuns
     texto = re.sub(r'^(Assitente:|Assistant:|Resposta:)\s*', '', texto, flags=re.IGNORECASE | re.MULTILINE)
-    return texto
+    return texto.strip()
 
-async def initialize_rag_system():
-    global _initialized
-    if _initialized: return
-    
-    logger.info("🚀 Inicializando Sistema de Especialistas (RAG)...")
-    # Agora carrega o dicionário de índices (Engenharia, Direito, etc)
-    indices = await asyncio.to_thread(carregar_indices)
-    
-    if indices:
-        logger.success(f"✅ {len(indices)} áreas de conhecimento carregadas!")
-        _initialized = True
-    else:
-        logger.warning("⚠️ Nenhum índice encontrado em storage_indexes/.")
+def _initialize_rag():
+    global _vectorstore, _rag_chain, _initialized
+    if _initialized: return True
+    try:
+        from app.core.rag import criar_vectorstore, criar_rag_chain
+        logger.info("🚀 Inicializando RAG...")
+        _vectorstore = criar_vectorstore()
+        if _vectorstore:
+            _rag_chain = criar_rag_chain(_vectorstore)
+            logger.success("✅ RAG Online!")
+            _initialized = True
+            return True
+        logger.warning("⚠️ RAG vazio (sem PDFs).")
+        return False
+    except Exception as e:
+        logger.error(f"❌ Erro RAG: {e}")
+        return False
+
+def get_rag_chain():
+    _initialize_rag()
+    return _rag_chain
 
 @router.get("/")
 async def index():
@@ -44,91 +53,71 @@ async def index():
 
 @router.get("/knowledge-areas")
 async def get_knowledge_areas():
-    # Retorna as pastas encontradas em storage_indexes
+    _initialize_rag()
     try:
-        base_path = "storage_indexes"
-        if not os.path.exists(base_path): return {"areas": []}
-        
-        areas = [d.replace("index_", "").capitalize() for d in os.listdir(base_path) if d.startswith("index_")]
-        return {"areas": sorted(areas)}
+        with open(os.path.join(settings.vectorstore_path, "manifest.json"), "r") as f:
+            data = json.load(f)
+            return {"areas": sorted(list(set(data.values())))}
     except: return {"areas": []}
 
 @router.post("/chat")
 async def chat(request: Request, body: ChatRequest):
     if not body.message.strip(): return StreamingResponse(iter([]))
-    
-    # 1. Recupera a chain correta para a área solicitada
-    area_key = body.area.lower() if body.area else "institucional"
-    try:
-        # Aqui conectamos a escolha do usuário com o índice específico
-        chain = get_rag_chain(area_key)
-    except ValueError:
-        # Fallback se a área não existir
-        chain = get_rag_chain("institucional")
+    rag_chain = get_rag_chain()
+    if not rag_chain: return StreamingResponse(iter(['data: {"type": "error", "content": "Sistema iniciando..."}\n\n']))
 
     async def event_stream():
         try:
+            # Gestão de Sessão
             session_id = request.cookies.get("session_id") or str(uuid.uuid4())
             if not hasattr(request.app, 'chat_memory'): request.app.chat_memory = {}
             history = request.app.chat_memory.setdefault(session_id, [])
             
-            # Converte histórico para tuplas (User, AI)
-            chat_history = [(h["content"], history[i+1]["content"]) for i, h in enumerate(history[:-1]) if h["role"] == "user" and i+1 < len(history)]
+            # Formata histórico para LangChain (apenas pares user/ai)
+            tuples = [(h["content"], history[i+1]["content"]) for i, h in enumerate(history[:-1]) if h["role"] == "user" and i+1 < len(history)]
 
             def sse(d): return f"data: {json.dumps(d)}\n\n"
             yield sse({"type": "start"})
 
-            # 2. STREAMING REAL (Corrigido para o seu Frontend)
-            # Usamos .astream para não bloquear o servidor enquanto gera
-            full_answer = ""
-            source_documents = []
+            # Invoca a IA
+            res = await asyncio.to_thread(rag_chain.invoke, {"question": body.message, "chat_history": tuples[-6:]})
+            
+            raw_answer = res.get("answer", "")
+            final_text = _limpar_resposta(raw_answer)
+            if not final_text: final_text = "O documento não contém informações sobre isso."
 
-            # O input do invoke/stream depende de como o chain foi criado no rag.py.
-            # Geralmente ConversationalRetrievalChain aceita "question" e "chat_history"
-            async for chunk in chain.astream({"question": body.message, "chat_history": chat_history}):
-                
-                # Captura trechos da resposta (Answer)
-                if "answer" in chunk:
-                    token = chunk["answer"]
-                    token = _limpar_resposta(token) # Limpeza em tempo real
-                    if token:
-                        full_answer += token
-                        # Envia no formato exato que o script.js espera
-                        yield sse({"type": "chunk", "content": token})
-                
-                # Captura documentos fonte (geralmente vem no final ou num chunk específico)
-                if "source_documents" in chunk:
-                    source_documents = chunk["source_documents"]
-
-            # 3. Processamento de Fontes (Mantendo sua lógica de visualização)
-            if source_documents:
+            # ENVIA CARACTERE POR CARACTERE (Evita Loop)
+            for char in final_text:
+                yield sse({"type": "chunk", "content": char})
+                await asyncio.sleep(0.001) # Delay técnico
+            
+            # Envia Fontes
+            docs = res.get("source_documents", [])
+            if docs:
                 sources = []
                 seen = set()
-                for d in source_documents:
-                    # Tenta pegar metadados, com fallbacks
+                for d in docs:
                     src = d.metadata.get("source", "Doc")
-                    page = str(d.metadata.get("page", 0) + 1)
-                    
-                    # Limpa o caminho do arquivo para ficar bonito no frontend
+                    # Simplifica caminho para exibição
                     if "pdfs/" in src: src = src.split("pdfs/")[-1]
                     elif "/" in src: src = os.path.basename(src)
                     
-                    key = f"{src}|{page}"
+                    pg = str(d.metadata.get("page", 0) + 1)
+                    key = f"{src}|{pg}"
                     if key not in seen:
                         sources.append(key)
                         seen.add(key)
-                
                 yield sse({"type": "sources", "content": sources})
 
-            # Atualiza memória
-            history.extend([{"role": "user", "content": body.message}, {"role": "ai", "content": full_answer}])
-            request.app.chat_memory[session_id] = history[-10:] # Mantém contexto curto e eficiente
+            # Atualiza Memória
+            history.extend([{"role": "user", "content": body.message}, {"role": "ai", "content": final_text}])
+            request.app.chat_memory[session_id] = history[-12:] # Mantém últimas 6 interações
             
             yield sse({"type": "complete"})
 
         except Exception as e:
             logger.error(f"Erro Stream: {e}")
-            yield sse({"type": "error", "content": "Desculpe, tive um erro ao processar sua solicitação."})
+            yield sse({"type": "error", "content": "Erro ao processar."})
 
     resp = StreamingResponse(event_stream(), media_type="text/event-stream")
     if not request.cookies.get("session_id"):
