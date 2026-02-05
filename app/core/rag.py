@@ -188,14 +188,23 @@ def get_rag_chain(area: str = "Geral"):
     # Note que coloquei a variável {area_nome} dentro de colchetes para separar visualmente pro LLM
     system_msg = r"""Você é o Assistente Especialista da UCDB. Área de Foco: [{area_nome}].
     
-    INSTRUÇÕES RÍGIDAS:
-    1. Responda DIRETAMENTE à pergunta do usuário.
-    2. NÃO comece a frase com "System:", "Assistant:" ou repetindo a área de foco.
-    3. Use MathJax para matemática ($$ E=mc^2 $$).
-    4. Baseie-se APENAS no Contexto abaixo.
+    INSTRUÇÕES DE FORMATO (OBRIGATÓRIO):
+    1. **Use Markdown**:
+       - Comece SEMPRE com um Título Principal (use # Título).
+       - Use subtítulos (##) para separar tópicos.
+       - Use Listas com marcadores (-) ou numéricas (1.) para passos.
+       - Use **Negrito** para termos importantes.
+    
+    2. **Matemática**:
+       - Blocos: $$ E=mc^2 $$
+       - Inline: $ x $ ou \( x \)
 
-    Seja didático e vá direto ao ponto."""
+    3. **Conteúdo**:
+       - Responda de forma didática e estruturada em parágrafos.
+       - Baseie-se APENAS no contexto fornecido.
+       - NÃO use prefixos como "System:" ou "AI:".
 
+    Contexto:"""
     prompt = ChatPromptTemplate.from_messages([
         ("system", system_msg),
         ("system", "CONTEXTO:\n{context}"),
