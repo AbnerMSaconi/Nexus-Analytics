@@ -6,11 +6,11 @@ aiofiles>=24.1.0
 python-dotenv>=1.0.1
 loguru>=0.7.2
 
-# Stack Moderna IA (LCEL)
+# Stack Moderna IA
 langchain==0.3.7
 langchain-community==0.3.7
-langchain-core==0.3.15
 langchain-text-splitters==0.3.2
+# Nota: O langchain-core será instalado automaticamente na versão correta (>=0.3.17)
 
 # Drivers
 faiss-cpu>=1.9.0
