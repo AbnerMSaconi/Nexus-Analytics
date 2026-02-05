@@ -189,135 +189,157 @@ document.addEventListener('DOMContentLoaded', () => {
     `);
         const contentDiv = botRow.querySelector('.conteudo-texto');
 
-        let fullText = "";
-        let isFirstChunk = true;
-        let buffer = ""; // Buffer para lidar com chunks parciais de rede
-
-        try {
-            const res = await fetch('/chat', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ message: text })
-            });
-
-            const reader = res.body.getReader();
-            const decoder = new TextDecoder();
-            let isFirstChunk = true;
-
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-
-                const chunk = decoder.decode(value, { stream: true });
-                const lines = chunk.split('\n\n');
-
-                for (const line of lines) {
-                    if (line.startsWith('data: ')) {
-                        try {
-                            const json = JSON.parse(line.substring(6));
-
-                            if (json.type === 'chunk') {
-                                // SE for o primeiro pedaço de texto, LIMPA os pontos flutuantes
-                                if (isFirstChunk) {
-                                    contentDiv.innerHTML = '';
-                                    isFirstChunk = false;
+                let fullText = "";
+                let isFirstChunk = true;
+        
+                try {
+                    const res = await fetch('/chat', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ message: text })
+                    });
+        
+                    const reader = res.body.getReader();
+                    const decoder = new TextDecoder();
+        
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+        
+                        const chunk = decoder.decode(value, { stream: true });
+                        const lines = chunk.split('\n\n');
+        
+                        for (const line of lines) {
+                            if (line.startsWith('data: ')) {
+                                try {
+                                    const json = JSON.parse(line.substring(6));
+        
+                                    if (json.type === 'chunk') {
+                                        if (isFirstChunk) {
+                                            contentDiv.innerHTML = '';
+                                            isFirstChunk = false;
+                                        }
+                                        fullText += json.content;
+                                        let displayTexto = fullText.replace(/^[.\-\s,]+/, "");
+                                        contentDiv.innerHTML = renderMarkdownWithMath(displayTexto);
+                                        chatContainer.scrollTop = chatContainer.scrollHeight;
+                                    }
+                                    // --- ADICIONE ESTA LÓGICA PARA AS FONTES ---
+                                    else if (json.type === 'sources' && json.content.length > 0) {
+                                        if (sourcesContent) {
+                                            sourcesContent.innerHTML = ''; // Limpa o texto "Buscando..."
+                                            json.content.forEach(sourcePath => {
+                                                // O backend envia o caminho relativo (ex: index_geral/documento.pdf)
+                                                // Pegamos apenas o nome do arquivo para exibir
+                                                const filename = sourcePath.split('/').pop();
+        
+                                                const item = document.createElement('div');
+                                                item.className = 'source-chunk';
+                                                item.innerHTML = `
+                                                    <strong><i class="far fa-file-pdf"></i> ${filename}</strong>
+                                                    <p><a href="/pdfs/${sourcePath}" target="_blank" style="color:var(--accent)">Visualizar PDF</a></p>
+                                                `;
+                                                sourcesContent.appendChild(item);
+                                            });
+        
+                                            // Abre o sidebar de referências automaticamente se estiver no Desktop
+                                            if (window.innerWidth > 1000) {
+                                                pnRight.classList.add('visivel');
+                                                btnRight.classList.add('ativo');
+                                            }
+                                        }
+                                    }
+                                } catch (e) {
+                                    contentDiv.innerHTML = `<span style="color:red">Erro na conexão.</span>`;
                                 }
-
-                                fullText += json.content;
-
-                                // Limpeza do ponto inicial no frontend (Garantia extra)
-                                let displayTexto = fullText.replace(/^[.\-\s,]+/, "");
-
-                                contentDiv.innerHTML = renderMarkdownWithMath(displayTexto);
-                                chatContainer.scrollTop = chatContainer.scrollHeight;
+                                finally {
+                                    // Desbloqueia a barra de chat
+                                    mainBtn.disabled = false;
+                                    mainInput.disabled = false;
+                                    mainInput.focus();
+                                }
                             }
-                        } catch (e) { }
+                            // Renderiza MathJax (Lento) APENAS no final para não travar o streaming
+                            triggerMathJax(contentDiv);
+                        }
                     }
+                } catch (error) {
+                    console.error('Erro ao enviar mensagem:', error);
+                    mainBtn.disabled = false;
+                    mainInput.disabled = false;
                 }
             }
-
-            // Renderiza MathJax (Lento) APENAS no final para não travar o streaming
-            triggerMathJax(contentDiv);
-
-        } catch (e) {
-            contentDiv.innerHTML = `<span style="color:red">Erro na conexão.</span>`;
-        } finally {
-            // Desbloqueia a barra de chat
-            mainBtn.disabled = false;
-            mainInput.disabled = false;
-            mainInput.focus();
-        }
-    }
-    // --- 5. LISTENERS ---
-
-    function handleEnter(e, inputEl) {
-        if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            const val = inputEl.value;
-            if (val.trim()) sendMessage(val);
-        }
-    }
-
-    function handleSendClick(inputEl) {
-        const val = inputEl.value;
-        if (val.trim()) sendMessage(val);
-    }
-
-    if (welcomeInput) {
-        welcomeInput.addEventListener('keydown', (e) => handleEnter(e, welcomeInput));
-        welcomeInput.addEventListener('input', function () { autoResize(this); });
-    }
-    if (mainInput) {
-        mainInput.addEventListener('keydown', (e) => handleEnter(e, mainInput));
-        mainInput.addEventListener('input', function () { autoResize(this); });
-    }
-
-    if (welcomeBtn) welcomeBtn.addEventListener('click', () => handleSendClick(welcomeInput));
-    if (mainBtn) mainBtn.addEventListener('click', () => handleSendClick(mainInput));
-
-    // UI Globais
-    if (btnLeft) btnLeft.onclick = () => toggleSidebar('left');
-    if (btnRight) btnRight.onclick = () => toggleSidebar('right');
-    if (overlay) overlay.onclick = () => closeAllSidebars();
-    document.querySelectorAll('.header-lateral').forEach(h => h.onclick = () => closeAllSidebars());
-
-    // Swipe
-    let touchStartX = 0;
-    pnRight.addEventListener('touchstart', e => { touchStartX = e.changedTouches[0].screenX; }, { passive: true });
-    pnRight.addEventListener('touchend', e => {
-        if (e.changedTouches[0].screenX - touchStartX > 50 && pnRight.classList.contains('visivel')) toggleSidebar('right');
-    }, { passive: true });
-
-    // --- 6. INICIALIZAÇÃO ---
-    async function init() {
-        try {
-            const res = await fetch('/knowledge-areas');
-            const data = await res.json();
-
-            if (sidebarList && data.areas) {
-                sidebarList.innerHTML = '';
-                if (data.areas.length === 0) sidebarList.innerHTML = '<div style="padding:15px;color:#aaa">Vazio</div>';
-
-                data.areas.forEach(a => {
-                    const d = document.createElement('div');
-                    d.className = 'sidebar-block';
-                    d.innerHTML = `<div style="padding:10px;cursor:pointer"><i class="fas fa-book"></i> ${a}</div>`;
-                    d.onclick = () => showSpecialistScreen(a);
-                    sidebarList.appendChild(d);
-                });
-
-                let welcomeText = "Olá! Sou o **UCDB-IA** 🧠.\nEstou pronto para ajudar.";
-                if (data.areas.length > 0) welcomeText += "\n\n**Vamos começar?**";
-                addMessage('ai', welcomeText);
+        
+            // --- 5. LISTENERS ---
+        
+            function handleEnter(e, inputEl) {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    const val = inputEl.value;
+                    if (val.trim()) sendMessage(val);
+                }
             }
-        } catch (e) {
-            addMessage('ai', "Olá! Sou o UCDB-IA.");
-        }
-
-        document.querySelectorAll('.card-area').forEach(c => {
-            c.onclick = () => showSpecialistScreen(c.getAttribute('data-area'));
+        
+            function handleSendClick(inputEl) {
+                const val = inputEl.value;
+                if (val.trim()) sendMessage(val);
+            }
+        
+            if (welcomeInput) {
+                welcomeInput.addEventListener('keydown', (e) => handleEnter(e, welcomeInput));
+                welcomeInput.addEventListener('input', function () { autoResize(this); });
+            }
+            if (mainInput) {
+                mainInput.addEventListener('keydown', (e) => handleEnter(e, mainInput));
+                mainInput.addEventListener('input', function () { autoResize(this); });
+            }
+        
+            if (welcomeBtn) welcomeBtn.addEventListener('click', () => handleSendClick(welcomeInput));
+            if (mainBtn) mainBtn.addEventListener('click', () => handleSendClick(mainInput));
+        
+            // UI Globais
+            if (btnLeft) btnLeft.onclick = () => toggleSidebar('left');
+            if (btnRight) btnRight.onclick = () => toggleSidebar('right');
+            if (overlay) overlay.onclick = () => closeAllSidebars();
+            document.querySelectorAll('.header-lateral').forEach(h => h.onclick = () => closeAllSidebars());
+        
+            // Swipe
+            let touchStartX = 0;
+            pnRight.addEventListener('touchstart', e => { touchStartX = e.changedTouches[0].screenX; }, { passive: true });
+            pnRight.addEventListener('touchend', e => {
+                if (e.changedTouches[0].screenX - touchStartX > 50 && pnRight.classList.contains('visivel')) toggleSidebar('right');
+            }, { passive: true });
+        
+            // --- 6. INICIALIZAÇÃO ---
+            async function init() {
+                try {
+                    const res = await fetch('/knowledge-areas');
+                    const data = await res.json();
+        
+                    if (sidebarList && data.areas) {
+                        sidebarList.innerHTML = '';
+                        if (data.areas.length === 0) sidebarList.innerHTML = '<div style="padding:15px;color:#aaa">Vazio</div>';
+        
+                        data.areas.forEach(a => {
+                            const d = document.createElement('div');
+                            d.className = 'sidebar-block';
+                            d.innerHTML = `<div style="padding:10px;cursor:pointer"><i class="fas fa-book"></i> ${a}</div>`;
+                            d.onclick = () => showSpecialistScreen(a);
+                            sidebarList.appendChild(d);
+                        });
+        
+                        let welcomeText = "Olá! Sou o **UCDB-IA** 🧠.\nEstou pronto para ajudar.";
+                        if (data.areas.length > 0) welcomeText += "\n\n**Vamos começar?**";
+                        addMessage('ai', welcomeText);
+                    }
+                } catch (e) {
+                    addMessage('ai', "Olá! Sou o UCDB-IA.");
+                }
+        
+                document.querySelectorAll('.card-area').forEach(c => {
+                    c.onclick = () => showSpecialistScreen(c.getAttribute('data-area'));
+                });
+            }
+        
+            init();
         });
-    }
-
-    init();
-});
