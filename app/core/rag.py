@@ -45,21 +45,14 @@ def format_docs(docs):
     return "\n\n".join(f"[Fonte: {d.metadata.get('source', 'Doc')}] {d.page_content}" for d in docs)
 
 def _sanitizar_resposta(texto: str) -> str:
-    """
-    Filtro 'Lava-Jato': Remove alucinações de tags do sistema.
-    Se a IA começar respondendo 'System: blabla', isso corta o 'System:'.
-    """
     if not texto: return ""
     
-    # 1. Remove prefixos de Chat (System:, AI:, Assistant:)
-    # O regex ^ significa "apenas no começo da linha"
+    # Remove prefixos de IA e espaços em branco nas pontas
     texto_limpo = re.sub(r'^(System|Assistant|User|AI|Human|RAG):\s*', '', texto, flags=re.IGNORECASE).strip()
     
-    # 2. Remove repetição do nome da área se vazar (ex: "em circuitos eletricos System:")
-    # Remove qualquer coisa que pareça um cabeçalho vazado antes de uma quebra de linha
-    if "System:" in texto_limpo:
-        texto_limpo = texto_limpo.split("System:")[-1].strip()
-        
+    # Remove especificamente pontos, vírgulas ou hífens que aparecem ANTES da primeira letra
+    texto_limpo = re.sub(r'^[.\-,\s\n]+', '', texto_limpo)
+    
     return texto_limpo
 
 # ==============================================================================
@@ -79,8 +72,10 @@ def classificar_conteudo_pdf(texto_bruto: str) -> str:
     """
 
     prompt = ChatPromptTemplate.from_messages([
-        ("system", system_instruction),
-        ("human", "Classifique: \"{texto_amostra}\"")
+        ("system", system_msg),
+        ("system", "CONTEXTO:\n{context}"),
+        MessagesPlaceholder(variable_name="chat_history"),
+        ("human", "{question}")
     ])
 
     chain = prompt | get_llm() | StrOutputParser()

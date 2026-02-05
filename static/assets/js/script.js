@@ -22,16 +22,15 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- REFERÊNCIAS ---
     const body = document.body;
     const chatContainer = document.getElementById('fluxo-conversa');
-    const welcomeScreen = document.getElementById('tela-boas-vindas');
     const welcomeTitle = document.getElementById('titulo-boas-vindas');
     const buttonsArea = document.getElementById('area-botoes');
     const overlay = document.getElementById('overlay-mobile');
-    
+
     const welcomeInput = document.getElementById('entrada-inicial');
     const welcomeBtn = document.getElementById('btn-enviar-inicial');
     const mainInput = document.getElementById('entrada-usuario');
     const mainBtn = document.getElementById('btn-enviar');
-    
+
     const sidebarList = document.getElementById('lista-materiais');
     const sourcesContent = document.getElementById('conteudo-fontes');
     const btnLeft = document.getElementById('btn-lateral-esquerda');
@@ -52,13 +51,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // PASSO B: Proteção (Esconde do Markdown)
         const mathBlocks = [];
-        
+
         // Protege Blocos $$...$$
         let protectedText = normalizedText.replace(/(\$\$[\s\S]*?\$\$)/g, (match) => {
             mathBlocks.push(match);
-            return `MATHBLOCK${mathBlocks.length - 1}ENDMATHBLOCK`; 
+            return `MATHBLOCK${mathBlocks.length - 1}ENDMATHBLOCK`;
         });
-        
+
         // Protege Inline $...$
         protectedText = protectedText.replace(/(\$[^$\n]+?\$)/g, (match) => {
             mathBlocks.push(match);
@@ -69,7 +68,7 @@ document.addEventListener('DOMContentLoaded', () => {
         let html = marked.parse(protectedText);
 
         // PASSO D: Restaura Fórmulas
-        html = html.replace(/MATHBLOCK(\d+)ENDMATHBLOCK/g, (match, index) => {
+        html = html.replace(/MATHBLOCK(\d+)ENDMATHBLOCK/g, (_, index) => {
             return mathBlocks[index];
         });
 
@@ -81,13 +80,13 @@ document.addEventListener('DOMContentLoaded', () => {
             window.MathJax.typesetPromise([element]).catch((err) => {
                 console.warn('MathJax Error:', err);
                 // Fallback: Tenta limpar e renderizar de novo se der erro
-                if(window.MathJax.typesetClear) window.MathJax.typesetClear([element]);
+                if (window.MathJax.typesetClear) window.MathJax.typesetClear([element]);
             });
         }
     }
 
     function autoResize(el) {
-        if(!el) return;
+        if (!el) return;
         el.style.height = 'auto';
         el.style.height = el.scrollHeight + 'px';
     }
@@ -99,7 +98,7 @@ document.addEventListener('DOMContentLoaded', () => {
         btnLeft.classList.remove('ativo');
         pnRight.classList.remove('visivel');
         btnRight.classList.remove('ativo');
-        if(overlay) overlay.classList.remove('ativo');
+        if (overlay) overlay.classList.remove('ativo');
     }
 
     function toggleSidebar(side) {
@@ -114,17 +113,17 @@ document.addEventListener('DOMContentLoaded', () => {
             otherBtn.classList.remove('ativo');
             panel.classList.add('visivel');
             btn.classList.add('ativo');
-            if(isMobile && overlay) overlay.classList.add('ativo');
+            if (isMobile && overlay) overlay.classList.add('ativo');
         } else {
             panel.classList.remove('visivel');
             btn.classList.remove('ativo');
-            if(isMobile) closeAllSidebars();
+            if (isMobile) closeAllSidebars();
         }
     }
 
     function showSpecialistScreen(areaName) {
         welcomeTitle.textContent = `Olá, eu sou o especialista em ${areaName}.`;
-        if(buttonsArea) buttonsArea.style.display = 'none';
+        if (buttonsArea) buttonsArea.style.display = 'none';
         welcomeInput.focus();
         welcomeInput.placeholder = `Pergunte sobre ${areaName}...`;
     }
@@ -136,25 +135,28 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- 4. FLUXO DE MENSAGEM ---
 
-    function addMessage(role, text = '') {
-        const isUser = role === 'user'; 
+    function addMessage(role, content = '') {
+        const isUser = role === 'user';
         const row = document.createElement('div');
         row.className = `chat-row ${isUser ? 'user' : 'bot'}`;
-        
+
         const bubble = document.createElement('div');
         bubble.className = `msg-bubble ${isUser ? 'usuario' : 'bot'}`;
-        
-        const content = document.createElement('div');
-        content.className = 'conteudo-texto';
-        
-        if (!isUser) {
-            content.innerHTML = renderMarkdownWithMath(text);
-            triggerMathJax(content); // Renderiza matemática
+
+        const textDiv = document.createElement('div');
+        textDiv.className = 'conteudo-texto';
+
+        // SE for uma mensagem do BOT e contiver a tag da animação, usamos innerHTML
+        // Caso contrário, usamos textContent para segurança
+        if (!isUser && content.includes('typing-indicator')) {
+            textDiv.innerHTML = content;
+        } else if (!isUser) {
+            textDiv.innerHTML = renderMarkdownWithMath(content);
         } else {
-            content.textContent = text;
+            textDiv.textContent = content;
         }
-        
-        bubble.appendChild(content);
+
+        bubble.appendChild(textDiv);
         row.appendChild(bubble);
         chatContainer.appendChild(row);
         chatContainer.scrollTop = chatContainer.scrollHeight;
@@ -165,34 +167,42 @@ document.addEventListener('DOMContentLoaded', () => {
         text = text.trim();
         if (!text) return;
 
+        // Reset de campos
         welcomeInput.value = '';
         mainInput.value = '';
-        autoResize(welcomeInput);
         autoResize(mainInput);
 
         activateChat();
-        if (sourcesContent) sourcesContent.innerHTML = '<p class="vazio"><i class="fas fa-search"></i> Buscando referências...</p>';
+        if (sourcesContent) sourcesContent.innerHTML = '<p class="vazio">Buscando referências...</p>';
 
         addMessage('user', text);
-        if(mainBtn) mainBtn.disabled = true;
 
-        const botRow = addMessage('ai', '<i class="fas fa-circle-notch fa-spin"></i> Processando...');
+        // Bloqueia interface para evitar múltiplos envios
+        mainBtn.disabled = true;
+        mainInput.disabled = true;
+
+        // Cria o balão do bot com o indicador de carregamento (os 3 pontos)
+        const botRow = addMessage('ai', `
+        <div class="typing-indicator">
+            <span></span><span></span><span></span>
+        </div>
+    `);
         const contentDiv = botRow.querySelector('.conteudo-texto');
-        
-        let fullText = ""; 
+
+        let fullText = "";
+        let isFirstChunk = true;
+        let buffer = ""; // Buffer para lidar com chunks parciais de rede
 
         try {
             const res = await fetch('/chat', {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ message: text })
             });
 
-            if (!res.ok) throw new Error("Erro na rede");
-
             const reader = res.body.getReader();
             const decoder = new TextDecoder();
-            contentDiv.innerHTML = '';
+            let isFirstChunk = true;
 
             while (true) {
                 const { done, value } = await reader.read();
@@ -205,44 +215,39 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (line.startsWith('data: ')) {
                         try {
                             const json = JSON.parse(line.substring(6));
-                            
+
                             if (json.type === 'chunk') {
-                                fullText += json.content;
-                                contentDiv.innerHTML = renderMarkdownWithMath(fullText);
-                                // Renderiza MathJax em tempo real (essencial para Chrome)
-                                triggerMathJax(contentDiv);
-                            }
-                            else if (json.type === 'sources' && json.content.length > 0) {
-                                if (sourcesContent) {
-                                    sourcesContent.innerHTML = '';
-                                    json.content.forEach(src => {
-                                        const [path, page] = src.split('|');
-                                        const filename = path.split('/').pop();
-                                        const item = document.createElement('div');
-                                        item.className = 'source-chunk';
-                                        item.innerHTML = `<strong><i class="far fa-file-pdf"></i> ${filename}</strong><p><a href="/pdfs/${path}" target="_blank" style="color:var(--accent)">Abrir PDF</a> (Pág. ${page})</p>`;
-                                        sourcesContent.appendChild(item);
-                                    });
-                                    if (window.innerWidth > 1000 && !pnRight.classList.contains('visivel')) {
-                                        toggleSidebar('right');
-                                    }
+                                // SE for o primeiro pedaço de texto, LIMPA os pontos flutuantes
+                                if (isFirstChunk) {
+                                    contentDiv.innerHTML = '';
+                                    isFirstChunk = false;
                                 }
+
+                                fullText += json.content;
+
+                                // Limpeza do ponto inicial no frontend (Garantia extra)
+                                let displayTexto = fullText.replace(/^[.\-\s,]+/, "");
+
+                                contentDiv.innerHTML = renderMarkdownWithMath(displayTexto);
+                                chatContainer.scrollTop = chatContainer.scrollHeight;
                             }
-                        } catch (e) {}
+                        } catch (e) { }
                     }
                 }
             }
-            if (sourcesContent && sourcesContent.innerHTML.includes('Buscando referências')) {
-                sourcesContent.innerHTML = '<p class="vazio">Nenhuma citação exata encontrada.</p>';
-            }
+
+            // Renderiza MathJax (Lento) APENAS no final para não travar o streaming
+            triggerMathJax(contentDiv);
+
         } catch (e) {
-            contentDiv.innerHTML = `<span style="color:red">Erro: ${e.message}</span>`;
+            contentDiv.innerHTML = `<span style="color:red">Erro na conexão.</span>`;
         } finally {
-            if(mainBtn) mainBtn.disabled = false;
+            // Desbloqueia a barra de chat
+            mainBtn.disabled = false;
+            mainInput.disabled = false;
             mainInput.focus();
         }
     }
-
     // --- 5. LISTENERS ---
 
     function handleEnter(e, inputEl) {
@@ -260,39 +265,39 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (welcomeInput) {
         welcomeInput.addEventListener('keydown', (e) => handleEnter(e, welcomeInput));
-        welcomeInput.addEventListener('input', function() { autoResize(this); });
+        welcomeInput.addEventListener('input', function () { autoResize(this); });
     }
     if (mainInput) {
         mainInput.addEventListener('keydown', (e) => handleEnter(e, mainInput));
-        mainInput.addEventListener('input', function() { autoResize(this); });
+        mainInput.addEventListener('input', function () { autoResize(this); });
     }
 
     if (welcomeBtn) welcomeBtn.addEventListener('click', () => handleSendClick(welcomeInput));
     if (mainBtn) mainBtn.addEventListener('click', () => handleSendClick(mainInput));
 
     // UI Globais
-    if(btnLeft) btnLeft.onclick = () => toggleSidebar('left');
-    if(btnRight) btnRight.onclick = () => toggleSidebar('right');
-    if(overlay) overlay.onclick = () => closeAllSidebars();
+    if (btnLeft) btnLeft.onclick = () => toggleSidebar('left');
+    if (btnRight) btnRight.onclick = () => toggleSidebar('right');
+    if (overlay) overlay.onclick = () => closeAllSidebars();
     document.querySelectorAll('.header-lateral').forEach(h => h.onclick = () => closeAllSidebars());
-    
+
     // Swipe
     let touchStartX = 0;
-    pnRight.addEventListener('touchstart', e => { touchStartX = e.changedTouches[0].screenX; }, {passive: true});
+    pnRight.addEventListener('touchstart', e => { touchStartX = e.changedTouches[0].screenX; }, { passive: true });
     pnRight.addEventListener('touchend', e => {
         if (e.changedTouches[0].screenX - touchStartX > 50 && pnRight.classList.contains('visivel')) toggleSidebar('right');
-    }, {passive: true});
+    }, { passive: true });
 
     // --- 6. INICIALIZAÇÃO ---
     async function init() {
         try {
             const res = await fetch('/knowledge-areas');
             const data = await res.json();
-            
+
             if (sidebarList && data.areas) {
                 sidebarList.innerHTML = '';
-                if(data.areas.length === 0) sidebarList.innerHTML = '<div style="padding:15px;color:#aaa">Vazio</div>';
-                
+                if (data.areas.length === 0) sidebarList.innerHTML = '<div style="padding:15px;color:#aaa">Vazio</div>';
+
                 data.areas.forEach(a => {
                     const d = document.createElement('div');
                     d.className = 'sidebar-block';
@@ -305,7 +310,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (data.areas.length > 0) welcomeText += "\n\n**Vamos começar?**";
                 addMessage('ai', welcomeText);
             }
-        } catch(e) {
+        } catch (e) {
             addMessage('ai', "Olá! Sou o UCDB-IA.");
         }
 
