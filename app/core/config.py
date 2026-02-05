@@ -44,7 +44,7 @@ class Settings(BaseSettings):
         "-m", "NousResearch_Hermes-3-Llama-3.1-8B-GGUF_Hermes-3-Llama-3.1-8B.Q4_K_M.gguf", 
         "--port", "8080", 
         "-fa", "1",       # Flash Attention (essencial para Llama 3)
-        "-c", "8192",     # Contexto
+        "-c", "16384",     # Contexto
         "-ngl", "99"      # GPU Offload máximo
     ]
     
