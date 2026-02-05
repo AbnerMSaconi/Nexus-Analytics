@@ -1,8 +1,10 @@
 import os
 import json
+import re  # <--- IMPORTANTE PARA O FILTRO
 from operator import itemgetter
-from typing import List
+from typing import List, Dict, Any
 
+# --- IMPORTS LANGCHAIN ---
 from langchain_core.runnables import RunnableParallel, RunnablePassthrough, RunnableLambda
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.output_parsers import StrOutputParser
@@ -12,6 +14,7 @@ from langchain_community.vectorstores import FAISS
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
+# --- IMPORTS DO PROJETO ---
 from app.utils.logger import logger
 from app.core.config import settings
 from app.core.embeddings import get_embeddings
@@ -19,14 +22,19 @@ from app.core.llm import get_llm
 
 _vectorstores_cache = {}
 
-# --- UTILITÁRIOS ---
+# ==============================================================================
+# 1. UTILITÁRIOS E FILTROS DE LIMPEZA
+# ==============================================================================
+
 def _normalizar_nome_area(nome_pasta: str) -> str:
     return nome_pasta.lower().strip().replace(" ", "_")
 
 def _carregar_manifesto(caminho_indice: str) -> dict:
     p = os.path.join(caminho_indice, "manifest.json")
     if os.path.exists(p):
-        with open(p, "r", encoding="utf-8") as f: return json.load(f)
+        try:
+            with open(p, "r", encoding="utf-8") as f: return json.load(f)
+        except: return {}
     return {}
 
 def _salvar_manifesto(caminho_indice: str, dados: dict):
@@ -36,7 +44,56 @@ def _salvar_manifesto(caminho_indice: str, dados: dict):
 def format_docs(docs):
     return "\n\n".join(f"[Fonte: {d.metadata.get('source', 'Doc')}] {d.page_content}" for d in docs)
 
-# --- INGESTÃO BLINDADA ---
+def _sanitizar_resposta(texto: str) -> str:
+    """
+    Filtro 'Lava-Jato': Remove alucinações de tags do sistema.
+    Se a IA começar respondendo 'System: blabla', isso corta o 'System:'.
+    """
+    if not texto: return ""
+    
+    # 1. Remove prefixos de Chat (System:, AI:, Assistant:)
+    # O regex ^ significa "apenas no começo da linha"
+    texto_limpo = re.sub(r'^(System|Assistant|User|AI|Human|RAG):\s*', '', texto, flags=re.IGNORECASE).strip()
+    
+    # 2. Remove repetição do nome da área se vazar (ex: "em circuitos eletricos System:")
+    # Remove qualquer coisa que pareça um cabeçalho vazado antes de uma quebra de linha
+    if "System:" in texto_limpo:
+        texto_limpo = texto_limpo.split("System:")[-1].strip()
+        
+    return texto_limpo
+
+# ==============================================================================
+# 2. CLASSIFICADOR DE CONTEÚDO
+# ==============================================================================
+
+def classificar_conteudo_pdf(texto_bruto: str) -> str:
+    amostra = texto_bruto[:2000].replace("\n", " ").strip()
+    
+    system_instruction = """Você é um Classificador de Documentos Acadêmicos.
+    Sua tarefa é ler um trecho e retornar APENAS: [Grande Área] - [Tópico Específico].
+    
+    REGRAS:
+    1. Máximo 6 palavras.
+    2. Sem aspas, sem pontos finais, sem introduções.
+    3. Exemplo: Engenharia Civil - Estruturas
+    """
+
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", system_instruction),
+        ("human", "Classifique: \"{texto_amostra}\"")
+    ])
+
+    chain = prompt | get_llm() | StrOutputParser()
+
+    try:
+        return chain.invoke({"texto_amostra": amostra}).strip()
+    except Exception:
+        return "Geral - Indefinido"
+
+# ==============================================================================
+# 3. INGESTÃO BLINDADA
+# ==============================================================================
+
 def atualizar_base_de_conhecimento():
     logger.info("🔄 Iniciando sincronização BLINDADA...")
     
@@ -53,7 +110,6 @@ def atualizar_base_de_conhecimento():
 
     for nome_pasta in areas:
         area_key = _normalizar_nome_area(nome_pasta)
-        
         origem = settings.pdf_path if nome_pasta == "Geral" else os.path.join(settings.pdf_path, nome_pasta)
         if nome_pasta == "Geral":
             arquivos = [f for f in itens if f.endswith('.pdf')]
@@ -75,8 +131,6 @@ def atualizar_base_de_conhecimento():
         for i, arq in enumerate(pendentes, 1):
             try:
                 logger.info(f"📄 [{i}/{len(pendentes)}] Processando: {arq}")
-                
-                # 1. Leitura e Split
                 loader = PyPDFLoader(os.path.join(origem, arq))
                 docs = loader.load()
                 
@@ -86,34 +140,31 @@ def atualizar_base_de_conhecimento():
                 
                 chunks = text_splitter.split_documents(docs)
                 if not chunks: 
-                    logger.warning(f"⚠️ Arquivo vazio ou ilegível: {arq}")
+                    logger.warning(f"⚠️ Arquivo vazio: {arq}")
                     continue
 
-                # 2. Geração de Embeddings e Salvamento
-                # Usamos um try/except interno para garantir que falhas de rede
-                # não corrompam o índice principal
                 try:
                     if os.path.exists(os.path.join(caminho_indice, "index.faiss")):
                         vs_atual = FAISS.load_local(caminho_indice, emb_model, allow_dangerous_deserialization=True)
-                        vs_atual.add_documents(chunks) # Se der erro aqui, ele não salva
+                        vs_atual.add_documents(chunks) 
                         vs_atual.save_local(caminho_indice)
                     else:
                         vs_novo = FAISS.from_documents(chunks, emb_model)
                         vs_novo.save_local(caminho_indice)
                     
-                    # Só atualiza o manifesto se salvou com sucesso
                     manifesto[arq] = "indexed"
                     _salvar_manifesto(caminho_indice, manifesto)
-                    logger.info(f"💾 {arq} salvo com sucesso.")
-                    
+                    logger.success(f"💾 {arq} salvo.")
                 except Exception as index_err:
-                    logger.error(f"❌ Erro ao gerar/salvar índice para {arq}. Ignorando arquivo. Detalhes: {index_err}")
-                    # Não relança o erro, apenas pula este arquivo para o próximo
+                    logger.error(f"❌ Erro ao salvar índice {arq}: {index_err}")
 
             except Exception as e:
-                logger.error(f"❌ Erro geral em {arq}: {e}")
+                logger.error(f"❌ Erro geral {arq}: {e}")
 
-# --- RAG PIPELINE (MANTIDO IGUAL) ---
+# ==============================================================================
+# 4. CHAT RAG (PIPELINE COM FILTRO)
+# ==============================================================================
+
 def get_rag_chain(area: str = "Geral"):
     global _vectorstores_cache
     
@@ -133,36 +184,24 @@ def get_rag_chain(area: str = "Geral"):
     retriever = vectorstore.as_retriever(search_kwargs={"k": 4})
     llm = get_llm()
 
-    def gerar_titulo_documento(texto_bruto: str) -> str:
-    # Limitamos a 3000 chars para não estourar o contexto e ser rápido
-        amostra = texto_bruto[:3000].replace("\n", " ").strip()
-        
-        prompt = f"""<|im_start|>system
-    Você é um Classificador de Documentos Acadêmicos de alta precisão.
-    Sua tarefa é ler um trecho de texto e retornar APENAS o nome da **Disciplina** e o **Tópico Principal**.
+    # Prompt Ajustado para evitar vazamento
+    # Note que coloquei a variável {area_nome} dentro de colchetes para separar visualmente pro LLM
+    system_msg = r"""Você é o Assistente Especialista da UCDB. Área de Foco: [{area_nome}].
+    
+    INSTRUÇÕES RÍGIDAS:
+    1. Responda DIRETAMENTE à pergunta do usuário.
+    2. NÃO comece a frase com "System:", "Assistant:" ou repetindo a área de foco.
+    3. Use MathJax para matemática ($$ E=mc^2 $$).
+    4. Baseie-se APENAS no Contexto abaixo.
 
-    REGRAS DE SAÍDA:
-    1. Formato: [Grande Área] - [Tópico Específico]
-    2. Use Título Capitalizado (Title Case).
-    3. Máximo de 6 palavras.
-    4. PROIBIDO escrever frases introdutórias ("O texto trata de...", "Título sugerido:").
-    5. PROIBIDO usar aspas ou ponto final.
+    Seja didático e vá direto ao ponto."""
 
-    EXEMPLOS (Input -> Output):
-    Input: "A integral de Riemann é definida como o limite da soma..."
-    Output: Cálculo Diferencial - Integrais
-
-    Input: "A Constituição Federal de 1988 estabelece os direitos fundamentais..."
-    Output: Direito Constitucional - Direitos Fundamentais
-
-    Input: "O transistor BJT opera em três regiões: corte, saturação e ativa..."
-    Output: Eletrônica Analógica - Transistores<|im_end|>
-    <|im_start|>user
-    Texto para classificar:
-    "{amostra}"<|im_end|>
-    <|im_start|>assistant
-    """
-        return prompt
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", system_msg),
+        ("system", "CONTEXTO:\n{context}"),
+        MessagesPlaceholder(variable_name="chat_history"),
+        ("human", "{question}")
+    ])
     
     chain = (
         RunnableParallel({
@@ -176,6 +215,7 @@ def get_rag_chain(area: str = "Geral"):
             | prompt
             | llm
             | StrOutputParser()
+            | RunnableLambda(_sanitizar_resposta) # <--- O FILTRO ENTRA AQUI!
         ))
         .pick(["answer", "context"])
     )
