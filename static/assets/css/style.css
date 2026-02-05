@@ -1,4 +1,94 @@
-/* UCDB-IA | Layout Responsivo (Corrigido Mobile + Auto-Resize) */
+body.tema-laranja {
+    --accent: #f97316;
+}
+
+body.tema-verde {
+    --accent: #10b981;
+}
+
+body.tema-vermelho {
+    --accent: #ef4444;
+}
+
+body.tema-roxo {
+    --accent: #8b5cf6;
+}
+
+/* Tema Engenharias (Laranja) */
+body.tema-laranja {
+    --accent: #f97316;
+    --border: rgba(249, 115, 22, 0.2);
+}
+
+body.tema-laranja .card-area[data-area="Engenharias"] {
+    background: rgba(249, 115, 22, 0.1);
+    border-color: var(--accent);
+}
+
+/* Tema Saúde (Verde) */
+body.tema-verde {
+    --accent: #10b981;
+    --border: rgba(16, 185, 129, 0.2);
+}
+
+body.tema-verde .card-area[data-area="Saúde"] {
+    background: rgba(16, 185, 129, 0.1);
+    border-color: var(--accent);
+}
+
+/* Tema Direito (Vermelho/Institucional) */
+body.tema-vermelho {
+    --accent: #ef4444;
+    --border: rgba(239, 68, 68, 0.2);
+}
+
+body.tema-vermelho .card-area[data-area="Direito"] {
+    background: rgba(239, 68, 68, 0.1);
+    border-color: var(--accent);
+}
+
+/* Tema Humanas (Roxo) */
+body.tema-roxo {
+    --accent: #8b5cf6;
+    --border: rgba(139, 92, 246, 0.2);
+}
+
+body.tema-roxo .card-area[data-area="Humanas"] {
+    background: rgba(139, 92, 246, 0.1);
+    border-color: var(--accent);
+}
+
+/* Suavização da transição de cores */
+body,
+.acao-interface,
+.msg-bubble.usuario,
+.entrada-wrapper,
+.card-area {
+    transition: background-color 0.4s ease, border-color 0.4s ease, color 0.4s ease;
+}
+
+/* Ajuste no Hub de Especialistas */
+.hub-especialistas {
+    margin-top: 2rem;
+    animation: fadeIn 0.5s ease;
+}
+
+.instrucao-hub {
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    margin-bottom: 1rem;
+}
+
+.card-area {
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    border: 1px solid var(--border);
+}
+
+.card-area:hover {
+    border-color: var(--accent);
+    background: rgba(255, 255, 255, 0.08);
+    transform: translateY(-5px);
+}
 
 :root {
     --bg-deep: #0f172a;
@@ -280,8 +370,10 @@ body:not(.estado-inicial) .welcome-container {
 
 .grade-especialistas {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
     gap: 15px;
+    max-width: 800px;
+    margin: 0 auto;
 }
 
 .card-area {
@@ -361,6 +453,15 @@ body:not(.estado-inicial) .welcome-container {
 
     .header h1 {
         font-size: 1.2rem;
+    }
+
+    .header h1 a {
+        cursor: pointer;
+        transition: opacity 0.2s;
+    }
+
+    .header h1 a:hover {
+        opacity: 0.8;
     }
 
     /* Overlay */
@@ -475,22 +576,31 @@ body:not(.estado-inicial) .welcome-container {
 /* --- VISUAL DE FÓRMULAS (QUADRINHOS) --- */
 
 /* Força o container a ser um bloco destacado */
-mjx-container[display="true"], 
+mjx-container[display="true"],
 .MathJax_Display {
     display: block !important;
-    margin: 1.5em 0 !important;       /* Espaço em cima e embaixo */
-    padding: 20px !important;         /* Espaço interno "gordinho" */
-    background: rgba(30, 41, 59, 0.8) !important; /* Fundo azul escuro/cinza */
-    border: 1px solid rgba(59, 130, 246, 0.3) !important; /* Borda sutil azul (accent) */
-    border-radius: 12px !important;   /* Cantos arredondados */
-    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2) !important; /* Sombra suave */
-    overflow-x: auto !important;      /* Barra de rolagem se a fórmula for gigante */
-    text-align: center !important;    /* Centraliza a fórmula */
+    margin: 1.5em 0 !important;
+    /* Espaço em cima e embaixo */
+    padding: 20px !important;
+    /* Espaço interno "gordinho" */
+    background: rgba(30, 41, 59, 0.8) !important;
+    /* Fundo azul escuro/cinza */
+    border: 1px solid rgba(59, 130, 246, 0.3) !important;
+    /* Borda sutil azul (accent) */
+    border-radius: 12px !important;
+    /* Cantos arredondados */
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2) !important;
+    /* Sombra suave */
+    overflow-x: auto !important;
+    /* Barra de rolagem se a fórmula for gigante */
+    text-align: center !important;
+    /* Centraliza a fórmula */
 }
 
 /* Ajuste na fonte da fórmula para ficar bem legível */
 mjx-container[display="true"] path {
-    stroke-width: 3; /* Deixa os símbolos um pouco mais "fortes" se possível */
+    stroke-width: 3;
+    /* Deixa os símbolos um pouco mais "fortes" se possível */
 }
 
 /* Fórmulas inline (no meio do texto) ganham um leve destaque também */
@@ -504,6 +614,7 @@ mjx-container:not([display="true"]) {
 .oculto {
     display: none !important;
 }
+
 /* Indicador de Digitação (3 pontos) */
 .typing-indicator {
     display: flex;
@@ -523,10 +634,25 @@ mjx-container:not([display="true"]) {
     animation: bounce 1.3s infinite ease-in-out;
 }
 
-.typing-indicator span:nth-child(2) { animation-delay: 0.15s; }
-.typing-indicator span:nth-child(3) { animation-delay: 0.3s; }
+.typing-indicator span:nth-child(2) {
+    animation-delay: 0.15s;
+}
+
+.typing-indicator span:nth-child(3) {
+    animation-delay: 0.3s;
+}
 
 @keyframes bounce {
-    0%, 80%, 100% { transform: translateY(0); opacity: 0.4; }
-    40% { transform: translateY(-6px); opacity: 1; }
+
+    0%,
+    80%,
+    100% {
+        transform: translateY(0);
+        opacity: 0.4;
+    }
+
+    40% {
+        transform: translateY(-6px);
+        opacity: 1;
+    }
 }
