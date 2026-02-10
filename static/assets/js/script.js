@@ -1,395 +1,306 @@
-let contextoAtivo = {
-    area: "Geral",
-    tema: ""
-};
-console.log("Script v6.0 carregado - Normalização Ativa");
-
+// static/assets/js/script.js - Versão Final Nexus
 document.addEventListener('DOMContentLoaded', () => {
-    // --- 1. CONFIGURAÇÃO MATHJAX ROBUSTA ---
-    // Define configurações globais antes mesmo do MathJax carregar
-    window.MathJax = {
-        tex: {
-            // Aceita tudo: $, $$, \(, \), \[, \]
-            inlineMath: [['$', '$'], ['\\(', '\\)']],
-            displayMath: [['$$', '$$'], ['\\[', '\\]']],
-            processEscapes: true,
-            processEnvironments: true
-        },
-        svg: { fontCache: 'global' },
-        startup: {
-            typeset: false // Vamos chamar manualmente para evitar conflitos
+    // Inicializa ícones Lucide
+    lucide.createIcons();
+
+    // --- ESTADO & REFERÊNCIAS ---
+    const state = {
+        token: localStorage.getItem('nexus_token'),
+        area: 'Geral',
+        user: null
+    };
+
+    const el = {
+        navChat: document.getElementById('nav-chat'),
+        navDocs: document.getElementById('nav-docs'),
+        navLogin: document.getElementById('nav-login'),
+        navLogout: document.getElementById('nav-logout'),
+        
+        viewHistory: document.getElementById('view-history'),
+        viewDocs: document.getElementById('view-docs'),
+        
+        welcomeScreen: document.getElementById('welcome-screen'),
+        chatContainer: document.getElementById('chat-container'),
+        messagesArea: document.getElementById('messages-area'),
+        chatInput: document.getElementById('chat-input'),
+        btnSend: document.getElementById('btn-send'),
+        chatHeader: document.getElementById('chat-header'),
+        chatTitle: document.getElementById('chat-title'),
+        
+        modalAuth: document.getElementById('modal-auth'),
+        formAuth: document.getElementById('form-auth'),
+        authTitle: document.getElementById('auth-title'),
+        btnToggleAuth: document.getElementById('btn-toggle-auth'),
+        btnCloseModal: document.getElementById('btn-close-modal'),
+        
+        listHistory: document.getElementById('list-history'),
+        listDocs: document.getElementById('list-docs'),
+        btnNewChat: document.getElementById('btn-new-chat')
+    };
+
+    // --- 1. NAVEGAÇÃO & UI ---
+    function switchTab(tab) {
+        el.navChat.classList.remove('active');
+        el.navDocs.classList.remove('active');
+        el.viewHistory.classList.add('hidden');
+        el.viewDocs.classList.add('hidden');
+
+        if (tab === 'chat') {
+            el.navChat.classList.add('active');
+            el.viewHistory.classList.remove('hidden');
+        } else {
+            el.navDocs.classList.add('active');
+            el.viewDocs.classList.remove('hidden');
+            loadDocs();
+        }
+    }
+
+    el.navChat.onclick = () => switchTab('chat');
+    el.navDocs.onclick = () => switchTab('docs');
+    
+    el.btnNewChat.onclick = () => {
+        el.messagesArea.innerHTML = '';
+        el.messagesArea.classList.add('hidden');
+        el.welcomeScreen.classList.remove('hidden');
+        el.chatHeader.classList.add('hidden');
+        state.area = 'Geral';
+        updateAreaSelection();
+    };
+
+    // --- 2. AUTENTICAÇÃO ---
+    function updateAuthState() {
+        if (state.token) {
+            el.navLogin.classList.add('hidden');
+            el.navLogout.classList.remove('hidden');
+            loadHistory();
+        } else {
+            el.navLogin.classList.remove('hidden');
+            el.navLogout.classList.add('hidden');
+            el.listHistory.innerHTML = '<div class="p-4 text-center"><i data-lucide="lock" class="mx-auto w-6 h-6 text-slate-600 mb-2"></i><p class="text-xs text-slate-500">Faça login para salvar seu histórico.</p></div>';
+            lucide.createIcons();
+        }
+    }
+
+    el.navLogin.onclick = () => el.modalAuth.classList.remove('hidden');
+    el.btnCloseModal.onclick = () => el.modalAuth.classList.add('hidden');
+    
+    el.navLogout.onclick = () => {
+        if(confirm("Deseja desconectar?")) {
+            localStorage.removeItem('nexus_token');
+            state.token = null;
+            updateAuthState();
+            location.reload();
         }
     };
 
-    // --- REFERÊNCIAS ---
-    const body = document.body;
-    const chatContainer = document.getElementById('fluxo-conversa');
-    const welcomeTitle = document.getElementById('titulo-boas-vindas');
-    const buttonsArea = document.getElementById('area-botoes');
-    const overlay = document.getElementById('overlay-mobile');
+    el.formAuth.onsubmit = async (e) => {
+        e.preventDefault();
+        const id = document.getElementById('auth-id').value;
+        const pass = document.getElementById('auth-pass').value;
+        const name = document.getElementById('auth-name').value;
+        const isSignup = !document.getElementById('field-name').classList.contains('hidden');
+        const btnText = document.getElementById('btn-auth-text');
 
-    const welcomeInput = document.getElementById('entrada-inicial');
-    const welcomeBtn = document.getElementById('btn-enviar-inicial');
-    const mainInput = document.getElementById('entrada-usuario');
-    const mainBtn = document.getElementById('btn-enviar');
-
-    const sidebarList = document.getElementById('lista-materiais');
-    const sourcesContent = document.getElementById('conteudo-fontes');
-    const btnLeft = document.getElementById('btn-lateral-esquerda');
-    const btnRight = document.getElementById('btn-lateral-direita');
-    const pnLeft = document.getElementById('painel-conhecimento');
-    const pnRight = document.getElementById('painel-fontes');
-
-    // --- 2. MOTOR DE RENDERIZAÇÃO INTELIGENTE ---
-
-    function renderMarkdownWithMath(text) {
-        if (!text) return '';
-
-        // PASSO A: Normalização (Padroniza a bagunça do modelo)
-        // Converte \[...\] para $$...$$
-        let normalizedText = text.replace(/\\\[/g, '$$').replace(/\\\]/g, '$$');
-        // Converte \(...\) para $...$
-        normalizedText = normalizedText.replace(/\\\(/g, '$').replace(/\\\)/g, '$');
-
-        // PASSO B: Proteção (Esconde do Markdown)
-        const mathBlocks = [];
-
-        // Protege Blocos $$...$$
-        let protectedText = normalizedText.replace(/(\$\$[\s\S]*?\$\$)/g, (match) => {
-            mathBlocks.push(match);
-            return `MATHBLOCK${mathBlocks.length - 1}ENDMATHBLOCK`;
-        });
-
-        // Protege Inline $...$
-        protectedText = protectedText.replace(/(\$[^$\n]+?\$)/g, (match) => {
-            mathBlocks.push(match);
-            return `MATHBLOCK${mathBlocks.length - 1}ENDMATHBLOCK`;
-        });
-
-        // PASSO C: Renderiza Markdown (Texto e formatação)
-        let html = marked.parse(protectedText);
-
-        // PASSO D: Restaura Fórmulas
-        html = html.replace(/MATHBLOCK(\d+)ENDMATHBLOCK/g, (_, index) => {
-            return mathBlocks[index];
-        });
-
-        return html;
-    }
-
-    function triggerMathJax(element) {
-        if (window.MathJax && window.MathJax.typesetPromise) {
-            window.MathJax.typesetPromise([element]).catch((err) => {
-                console.warn('MathJax Error:', err);
-                // Fallback: Tenta limpar e renderizar de novo se der erro
-                if (window.MathJax.typesetClear) window.MathJax.typesetClear([element]);
+        btnText.innerText = "Processando...";
+        
+        try {
+            const res = await fetch(isSignup ? '/signup' : '/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ external_id: id, password: pass, full_name: name })
             });
-        }
-    }
-
-    function autoResize(el) {
-        if (!el) return;
-        el.style.height = 'auto';
-        el.style.height = el.scrollHeight + 'px';
-    }
-
-    // --- 3. UI HELPERS ---
-
-    function closeAllSidebars() {
-        if (pnLeft) pnLeft.classList.remove('visivel');
-        if (btnLeft) btnLeft.classList.remove('ativo');
-        if (pnRight) pnRight.classList.remove('visivel');
-        if (btnRight) btnRight.classList.remove('ativo');
-        if (overlay) overlay.classList.remove('ativo');
-    }
-
-    function toggleSidebar(side) {
-        const isMobile = window.innerWidth < 1000;
-        const panel = side === 'left' ? pnLeft : pnRight;
-        const btn = side === 'left' ? btnLeft : btnRight;
-        const otherPanel = side === 'left' ? pnRight : pnLeft;
-        const otherBtn = side === 'left' ? btnRight : btnLeft;
-
-        if (!panel.classList.contains('visivel')) {
-            otherPanel.classList.remove('visivel');
-            otherBtn.classList.remove('ativo');
-            panel.classList.add('visivel');
-            btn.classList.add('ativo');
-            if (isMobile && overlay) overlay.classList.add('ativo');
-        } else {
-            panel.classList.remove('visivel');
-            btn.classList.remove('ativo');
-            if (isMobile) closeAllSidebars();
-        }
-    }
-
-    function showSpecialistScreen(areaName, temaClass = "") {
-        contextoAtivo.area = areaName;
-        contextoAtivo.tema = temaClass;
-
-        // Limpa temas anteriores antes de aplicar o novo
-        document.body.classList.remove('tema-laranja', 'tema-verde', 'tema-vermelho', 'tema-roxo');
-        
-        // Define a classe de estado e o tema novo
-        document.body.className = `estado-inicial ${temaClass}`;
-
-        if (buttonsArea) buttonsArea.style.display = 'none';
-        
-        if (welcomeTitle) welcomeTitle.textContent = `Olá, eu sou o especialista em ${areaName}.`;
-        if (welcomeInput) {
-            welcomeInput.focus();
-            welcomeInput.placeholder = `Pergunte sobre ${areaName}...`;
-        }
-        
-        console.log(`Contexto alterado para: ${areaName} com tema ${temaClass}`);
-    }
-
-    function activateChat() {
-        body.classList.remove('estado-inicial');
-        chatContainer.style.display = 'flex';
-    }
-
-    // --- 4. FLUXO DE MENSAGEM ---
-
-    function addMessage(role, content = '') {
-        const isUser = role === 'user';
-        const row = document.createElement('div');
-        row.className = `chat-row ${isUser ? 'user' : 'bot'}`;
-
-        const bubble = document.createElement('div');
-        bubble.className = `msg-bubble ${isUser ? 'usuario' : 'bot'}`;
-
-        const textDiv = document.createElement('div');
-        textDiv.className = 'conteudo-texto';
-
-        // SE for uma mensagem do BOT e contiver a tag da animação, usamos innerHTML
-        // Caso contrário, usamos textContent para segurança
-        if (!isUser && content.includes('typing-indicator')) {
-            textDiv.innerHTML = content;
-        } else if (!isUser) {
-            textDiv.innerHTML = renderMarkdownWithMath(content);
-        } else {
-            textDiv.textContent = content;
-        }
-
-        bubble.appendChild(textDiv);
-        row.appendChild(bubble);
-        chatContainer.appendChild(row);
-        chatContainer.scrollTop = chatContainer.scrollHeight;
-        return row;
-    }
-
-async function sendMessage(text) {
-    text = text.trim();
-    if (!text) return;
-    
-    // Reset de campos
-    if (welcomeInput) welcomeInput.value = '';
-    if (mainInput) mainInput.value = '';
-    if (mainInput) autoResize(mainInput);
-
-    activateChat();
-    if (sourcesContent) sourcesContent.innerHTML = '<p class="vazio">Buscando referências...</p>';
-
-    addMessage('user', text);
-
-    // Bloqueia interface
-    if (mainBtn) mainBtn.disabled = true;
-    if (mainInput) mainInput.disabled = true;
-
-    // Indicador de carregamento
-    const botRow = addMessage('ai', `
-        <div class="typing-indicator">
-            <span></span><span></span><span></span>
-        </div>
-    `);
-    const contentDiv = botRow.querySelector('.conteudo-texto');
-
-    let fullText = "";
-    let isFirstChunk = true;
-
-    try {
-        const res = await fetch('/chat', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-                message: text,
-                area: contextoAtivo.area // Envia o especialista selecionado no Hub
-            })
-        });
-
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-
-            const chunk = decoder.decode(value, { stream: true });
-            const lines = chunk.split('\n\n');
-
-            for (const line of lines) {
-                if (line.startsWith('data: ')) {
-                    try {
-                        const json = JSON.parse(line.substring(6));
-
-                        if (json.type === 'chunk') {
-                            if (isFirstChunk) {
-                                contentDiv.innerHTML = '';
-                                isFirstChunk = false;
-                            }
-                            fullText += json.content;
-                            // Limpa o ponto inicial e renderiza markdown
-                            let displayTexto = fullText.replace(/^[.\-\s,]+/, "");
-                            contentDiv.innerHTML = renderMarkdownWithMath(displayTexto);
-                            chatContainer.scrollTop = chatContainer.scrollHeight;
-                        }
-                        else if (json.type === 'sources' && json.content.length > 0) {
-                            renderSources(json.content); // Função auxiliar para limpar o HTML
-                        }
-                    } catch (e) {
-                        console.error("Erro no chunk:", e);
-                    }
-                }
+            const data = await res.json();
+            
+            if (res.ok) {
+                state.token = data.access_token;
+                localStorage.setItem('nexus_token', data.access_token);
+                el.modalAuth.classList.add('hidden');
+                updateAuthState();
+                alert(`Bem-vindo, ${id}!`);
+            } else {
+                alert(data.detail || "Falha na autenticação");
             }
-        }
-        
-    // Renderiza matemática apenas quando o texto terminar (Melhora a performance)
-    triggerMathJax(contentDiv);
+        } catch (err) { alert("Erro de conexão"); }
+        finally { btnText.innerText = isSignup ? "Cadastrar" : "Entrar no Sistema"; }
+    };
 
-} catch (error) {
-    console.error('Erro ao enviar mensagem:', error);
-    contentDiv.innerHTML = `<span style="color:red">Erro na conexão com o servidor.</span>`;
-} finally {
-    // SEMPRE desbloqueia a interface no final
-    if (mainBtn) mainBtn.disabled = false;
-    if (mainInput) mainInput.disabled = false;
-    if (mainInput) mainInput.focus();
-}
-}
+    el.btnToggleAuth.onclick = (e) => {
+        e.preventDefault();
+        const fieldName = document.getElementById('field-name');
+        fieldName.classList.toggle('hidden');
+        const isSignup = !fieldName.classList.contains('hidden');
+        el.authTitle.innerText = isSignup ? "Criar Nova Conta" : "Acesso Corporativo";
+        el.btnToggleAuth.innerText = isSignup ? "Já tenho conta" : "Criar nova conta";
+        document.getElementById('btn-auth-text').innerText = isSignup ? "Cadastrar" : "Entrar no Sistema";
+    };
 
-// Função auxiliar para organizar as fontes
-function renderSources(sources) {
-    if (!sourcesContent) return;
-    sourcesContent.innerHTML = ''; 
-    sources.forEach(sourcePath => {
-        const filename = sourcePath.split('/').pop();
-        const item = document.createElement('div');
-        item.className = 'source-chunk';
-        item.innerHTML = `
-            <strong><i class="far fa-file-pdf"></i> ${filename}</strong>
-            <p><a href="/pdfs/${sourcePath}" target="_blank" style="color:var(--accent)">Visualizar PDF</a></p>
-        `;
-        sourcesContent.appendChild(item);
+    // --- 3. LÓGICA DO CHAT ---
+    function updateAreaSelection() {
+        document.querySelectorAll('.card-area').forEach(btn => {
+            if (btn.dataset.area === state.area) {
+                btn.classList.add('selected');
+            } else {
+                btn.classList.remove('selected');
+            }
+        });
+    }
+
+    document.querySelectorAll('.card-area').forEach(btn => {
+        btn.onclick = () => {
+            state.area = btn.dataset.area;
+            updateAreaSelection();
+        };
     });
 
-    if (window.innerWidth > 1000) {
-        pnRight.classList.add('visivel');
-        btnRight.classList.add('ativo');
-    }
-}
+    async function sendMessage() {
+        const text = el.chatInput.value.trim();
+        if (!text) return;
+
+        // UI Updates
+        el.welcomeScreen.classList.add('hidden');
+        el.messagesArea.classList.remove('hidden');
+        el.chatHeader.classList.remove('hidden');
+        el.chatTitle.innerText = state.area; // Atualiza título
+        el.chatInput.value = '';
         
-            // --- 5. LISTENERS ---
-    
-            function handleEnter(e, inputEl) {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    const val = inputEl.value;
-                    if (val.trim()) sendMessage(val);
-                }
-            }
-        
-            function handleSendClick(inputEl) {
-                const val = inputEl.value;
-                if (val.trim()) sendMessage(val);
-            }
-        
-            if (welcomeInput) {
-                welcomeInput.addEventListener('keydown', (e) => handleEnter(e, welcomeInput));
-                welcomeInput.addEventListener('input', function () { autoResize(this); });
-            }
-            if (mainInput) {
-                mainInput.addEventListener('keydown', (e) => handleEnter(e, mainInput));
-                mainInput.addEventListener('input', function () { autoResize(this); });
-            }
-    
-            if (welcomeBtn) welcomeBtn.addEventListener('click', () => handleSendClick(welcomeInput));
-            if (mainBtn) mainBtn.addEventListener('click', () => handleSendClick(mainInput));
-    
-            // UI Globais
-            if (btnLeft) btnLeft.onclick = () => toggleSidebar('left');
-            if (btnRight) btnRight.onclick = () => toggleSidebar('right');
-            if (overlay) overlay.onclick = () => closeAllSidebars();
-            document.querySelectorAll('.header-lateral').forEach(h => h.onclick = () => closeAllSidebars());
-        
-            // Swipe
-            let touchStartX = 0;
-            if (pnRight) {
-                pnRight.addEventListener('touchstart', e => { touchStartX = e.changedTouches[0].screenX; }, { passive: true });
-                pnRight.addEventListener('touchend', e => {
-                    if (e.changedTouches[0].screenX - touchStartX > 50 && pnRight.classList.contains('visivel')) toggleSidebar('right');
-                }, { passive: true });
-            }
-    
-            // --- 6. INICIALIZAÇÃO ---
-            async function init() {
-                try {
-                    const res = await fetch('/knowledge-areas');
-                    const data = await res.json();
-    
-                    if (sidebarList && data.areas) {
-                        sidebarList.innerHTML = '';
-                        if (data.areas.length === 0) sidebarList.innerHTML = '<div style="padding:15px;color:#aaa">Vazio</div>';
-    
-                        data.areas.forEach(a => {
-                            const d = document.createElement('div');
-                            d.className = 'sidebar-block';
-                            d.innerHTML = `<div style="padding:10px;cursor:pointer"><i class="fas fa-book"></i> ${a}</div>`;
-                            d.onclick = () => showSpecialistScreen(a);
-                            sidebarList.appendChild(d);
-                        });
-    
-                        let welcomeText = "Olá! Sou o **UCDB-IA** 🧠.\nEstou pronto para ajudar.";
-                        if (data.areas.length > 0) welcomeText += "\n\n**Vamos começar?**";
-                        addMessage('ai', welcomeText);
+        appendMessage('user', text);
+        const botBubble = appendMessage('ai', '<div class="flex items-center gap-2"><span class="w-2 h-2 bg-blue-500 rounded-full animate-bounce"></span><span class="text-xs text-slate-400">Analisando documentos...</span></div>');
+
+        try {
+            const headers = { 'Content-Type': 'application/json' };
+            if (state.token) headers['Authorization'] = `Bearer ${state.token}`;
+
+            const res = await fetch('/chat', {
+                method: 'POST',
+                headers: headers,
+                body: JSON.stringify({ message: text, area: state.area })
+            });
+
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder();
+            let fullText = "";
+            let citations = [];
+            let isFirstChunk = true;
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                
+                const chunk = decoder.decode(value, { stream: true });
+                const lines = chunk.split('\n\n');
+                
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        try {
+                            const data = JSON.parse(line.substring(6));
+                            if (data.type === 'chunk') {
+                                if (isFirstChunk) { botBubble.innerHTML = ''; isFirstChunk = false; }
+                                fullText += data.content;
+                                botBubble.innerHTML = marked.parse(fullText);
+                                el.chatContainer.scrollTop = el.chatContainer.scrollHeight;
+                            } else if (data.type === 'sources') {
+                                citations = data.content;
+                            }
+                        } catch (e) {}
                     }
-                } catch (e) {
-                    addMessage('ai', "Olá! Sou o UCDB-IA.");
                 }
-    
-                document.querySelectorAll('.card-area').forEach(c => {
-                    c.onclick = () => {
-                        const area = c.getAttribute('data-area');
-                        const tema = c.getAttribute('data-tema');
-                        showSpecialistScreen(area, tema);
-                    };
-                });
             }
-    
-            const logoLink = document.getElementById('logo-link');
-    
-            if (logoLink) {
-                logoLink.addEventListener('click', (e) => {
-                    // Se quiser apenas recarregar a página, remova o preventDefault
-                    e.preventDefault(); 
-                    
-                    // 1. Reseta o estado global
-                    contextoAtivo.area = "Geral";
-                    contextoAtivo.tema = "";
-                    
-                    // 2. Remove classes de tema e restaura o estado inicial
-                    document.body.className = "estado-inicial";
-                    
-                    // 3. Mostra o Hub novamente
-                    if (buttonsArea) buttonsArea.style.display = 'block';
-                    if (chatContainer) chatContainer.style.display = 'none';
-                    
-                    // 4. Limpa o fluxo de conversa para um novo começo
-                    if (chatContainer) chatContainer.innerHTML = '';
-                    
-                    console.log("Retornando ao Hub inicial...");
-                });
+
+            // Append citations
+            if (citations.length > 0) {
+                const citeHTML = citations.map(c => `
+                    <div class="citation-item">
+                        <i data-lucide="file-text" class="w-3 h-3 inline mr-2 text-blue-400"></i>${c}
+                    </div>`
+                ).join('');
+                botBubble.innerHTML += `
+                    <div class="citation-block">
+                        <div class="citation-header"><i data-lucide="book-open" class="w-3 h-3"></i> FONTES UTILIZADAS</div>
+                        ${citeHTML}
+                    </div>`;
+                lucide.createIcons();
             }
-    
-            init();
-        });
+            
+            // Re-render MathJax
+            if(window.MathJax) window.MathJax.typesetPromise([botBubble]);
+
+            if (state.token) loadHistory(); 
+
+        } catch (e) {
+            botBubble.innerHTML = "<span class='text-red-400'>Erro de conexão com o servidor RAG.</span>";
+        }
+    }
+
+    function appendMessage(role, html) {
+        const div = document.createElement('div');
+        div.className = `msg-row ${role}`;
+        div.innerHTML = `
+            ${role === 'ai' ? '<div class="msg-avatar ai"><i data-lucide="bot"></i></div>' : ''}
+            <div class="msg-bubble">${html}</div>
+            ${role === 'user' ? '<div class="msg-avatar user"><i data-lucide="user"></i></div>' : ''}
+        `;
+        el.messagesArea.appendChild(div);
+        el.chatContainer.scrollTop = el.chatContainer.scrollHeight;
+        lucide.createIcons();
+        return div.querySelector('.msg-bubble');
+    }
+
+    // --- 4. DADOS ---
+    async function loadHistory() {
+        if (!state.token) return;
+        try {
+            const res = await fetch('/conversations', { headers: { 'Authorization': `Bearer ${state.token}` } });
+            if (res.status === 401) { 
+                localStorage.removeItem('nexus_token'); 
+                state.token = null;
+                updateAuthState();
+                return; 
+            }
+            const data = await res.json();
+            el.listHistory.innerHTML = data.map(c => `
+                <div class="p-3 mx-2 mb-1 hover:bg-slate-800 rounded-lg cursor-pointer transition-colors group">
+                    <div class="font-medium text-slate-300 text-sm truncate group-hover:text-white">${c.title || 'Nova Conversa'}</div>
+                    <div class="text-[10px] text-slate-600 flex items-center gap-1 mt-1">
+                        <i data-lucide="clock" class="w-3 h-3"></i> ${new Date(c.updated_at).toLocaleDateString()}
+                    </div>
+                </div>
+            `).join('');
+            lucide.createIcons();
+        } catch (e) {}
+    }
+
+    async function loadDocs() {
+        el.listDocs.innerHTML = '<div class="text-center mt-4"><span class="w-4 h-4 border-2 border-blue-500 rounded-full animate-spin inline-block"></span></div>';
+        try {
+            const res = await fetch('/knowledge-areas');
+            const data = await res.json();
+            
+            if (data.areas.length === 0) {
+                el.listDocs.innerHTML = '<p class="text-xs text-slate-500 text-center mt-4">Nenhuma área indexada.</p>';
+                return;
+            }
+
+            el.listDocs.innerHTML = data.areas.map(area => `
+                <div class="bg-slate-800/50 p-3 rounded-xl mb-3 border border-slate-800 hover:border-slate-700 transition-colors">
+                    <div class="flex items-center gap-3">
+                        <div class="w-8 h-8 bg-slate-800 rounded-lg flex items-center justify-center text-yellow-500">
+                            <i data-lucide="folder"></i>
+                        </div>
+                        <div>
+                            <div class="font-medium text-slate-200 text-sm">${area}</div>
+                            <div class="text-[10px] text-slate-500">Índice Vetorial Disponível</div>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+            lucide.createIcons();
+        } catch (e) {
+            el.listDocs.innerHTML = '<p class="text-xs text-red-400 text-center">Erro ao carregar docs.</p>';
+        }
+    }
+
+    // Inicialização
+    el.btnSend.onclick = sendMessage;
+    el.chatInput.onkeydown = (e) => { if(e.key === 'Enter') sendMessage(); };
+    updateAuthState();
+});
