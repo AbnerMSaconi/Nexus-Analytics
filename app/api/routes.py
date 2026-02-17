@@ -58,12 +58,52 @@ async def read_users_me(current_user: models.User = Depends(get_current_user)):
 
 @router.get("/knowledge-areas")
 async def get_knowledge_areas():
+    """
+    Retorna estrutura completa: Áreas -> Documentos -> Títulos IA
+    Lê os arquivos manifest.json gerados pelo processo de ingestão.
+    """
     try:
         base = settings.vectorstore_path
-        if not os.path.exists(base): return {"areas": []}
-        areas = [d.replace("index_", "").capitalize() for d in os.listdir(base) if d.startswith("index_")]
-        return {"areas": sorted(areas)}
-    except: return {"areas": []}
+        if not os.path.exists(base): return {"data": []}
+        
+        result = []
+        # Lista apenas diretórios que começam com 'index_'
+        dirs = [d for d in os.listdir(base) if d.startswith("index_")]
+        
+        for d in sorted(dirs):
+            # Formata o nome da área (ex: index_engenharia -> Engenharia)
+            area_name = d.replace("index_", "").replace("_", " ").capitalize()
+            manifest_path = os.path.join(base, d, "manifest.json")
+            
+            documents = []
+            
+            # Se existe um manifesto, lê os metadados reais (títulos da IA)
+            if os.path.exists(manifest_path):
+                try:
+                    with open(manifest_path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                        # O manifesto é um dict: { "arquivo.pdf": { "title": "...", ... } }
+                        for filename, meta in data.items():
+                            if isinstance(meta, dict):
+                                documents.append({
+                                    "filename": filename,
+                                    "title": meta.get("title", filename), # Usa o título da IA ou nome do arquivo
+                                    "pages": meta.get("pages_indexed", 0),
+                                    "updated": meta.get("last_updated", "")
+                                })
+                except Exception as e:
+                    logger.error(f"Erro lendo manifesto de {area_name}: {e}")
+            
+            # Adiciona mesmo se não tiver documentos (para mostrar a pasta vazia)
+            result.append({
+                "area": area_name,
+                "documents": documents
+            })
+            
+        return {"data": result}
+    except Exception as e:
+        logger.error(f"Erro ao listar áreas: {e}")
+        return {"data": []}
 
 @router.get("/conversations")
 async def get_conversations(current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
@@ -139,29 +179,23 @@ async def chat(request: Request, body: schemas.ChatRequest, db: Session = Depend
                 if "source_documents" in chunk:
                     source_documents = chunk["source_documents"]
 
-            # ATUALIZAÇÃO CRÍTICA: Envia metadados completos (filename, area, topic)
             if source_documents:
                 unique_sources = {}
                 for d in source_documents:
                     full_path = d.metadata.get("source", "")
                     filename = os.path.basename(full_path)
-
-                    # Truque: Descobre o caminho relativo da pasta 'pdfs' até o arquivo
-                    # Ex: se full_path = /usr/home/app/pdfs/Saude/doc.pdf
-                    # relative_path será "Saude/doc.pdf" ou apenas "doc.pdf" se estiver na raiz
+                    
                     try:
                         relative_path = os.path.relpath(full_path, settings.pdf_path)
                     except ValueError:
-                        # Fallback se o caminho estiver fora da base (não deveria acontecer)
                         relative_path = filename
 
                     if filename not in unique_sources:
                         unique_sources[filename] = {
                             "filename": filename,
-                            "filepath": relative_path, # <--- Novo campo com o caminho exato
+                            "filepath": relative_path,
                             "topic": d.metadata.get("topic", "Documento")
                         }
-                # Envia JSON completo garantindo que caracteres especiais passem (ensure_ascii=False)
                 yield f"data: {json.dumps({'type': 'sources', 'content': list(unique_sources.values())}, ensure_ascii=False)}\n\n"
 
             if conversation_id:

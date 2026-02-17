@@ -36,34 +36,40 @@ export const StorageService = {
     }
   },
 
-  // --- NOVA FUNÇÃO DE EXCLUSÃO ---
   async deleteSession(sessionId: string, userId: string): Promise<void> {
     try {
       const sessions = await this.getSessions(userId);
       const newSessions = sessions.filter(s => s.id !== sessionId);
       localStorage.setItem(`sessions_${userId}`, JSON.stringify(newSessions));
       window.dispatchEvent(new Event('storage'));
-      
-      // Opcional: Tenta deletar do backend também se houver token (Futuro)
-      // const token = localStorage.getItem('nexus_token');
-      // if(token) fetch(`${API_BASE_URL}/conversations/${sessionId}`, { method: 'DELETE', ... })
-      
     } catch (error) {
       console.error("[StorageService] Falha ao excluir sessão:", error);
     }
   },
 
+  // --- ATUALIZAÇÃO AQUI ---
+  // Agora buscamos a estrutura rica (com títulos) do backend
   async getFolders(): Promise<Folder[]> {
     try {
       const res = await fetch(`${API_BASE_URL}/knowledge-areas`);
       if (!res.ok) throw new Error(`Erro HTTP: ${res.status}`);
-      const data = await res.json();
       
-      return data.areas.map((area: string) => ({
-        id: area.toLowerCase().replace(/\s+/g, '-'),
-        name: area,
-        documents: [] 
+      const response = await res.json();
+      // O backend retorna: { data: [ { area: "...", documents: [ { title: "...", ... } ] } ] }
+      
+      return response.data.map((item: any) => ({
+        id: item.area.toLowerCase().replace(/\s+/g, '-'),
+        name: item.area,
+        documents: item.documents.map((doc: any) => ({
+          id: doc.filename,
+          // Aqui usamos o título gerado pela IA. Se não tiver, usa o nome do arquivo.
+          title: doc.title || doc.filename, 
+          content: `Documento PDF com ${doc.pages} páginas processadas.`, // Descrição para preview
+          type: 'pdf',
+          uploadDate: doc.updated || new Date().toISOString()
+        }))
       }));
+
     } catch (error) {
       console.error("[StorageService] Erro ao buscar áreas:", error);
       return [];
