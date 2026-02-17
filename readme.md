@@ -1,282 +1,138 @@
 # UCDB-IA 🧠💬
 
-Bem-vindo ao UCDB-IA, um assistente de estudos académico inteligente, projetado para responder a perguntas complexas com base num conjunto de documentos PDF fornecidos. Este projeto utiliza uma arquitetura **RAG (Retrieval-Augmented Generation)** para combinar o poder de um Modelo de Linguagem Grande (LLM) local com a informação específica dos seus documentos.
+Bem-vindo ao **UCDB-IA**, um assistente acadêmico inteligente projetado para responder perguntas complexas com base em documentos internos. Este projeto utiliza uma arquitetura **RAG (Retrieval-Augmented Generation)** para combinar o poder de um Modelo de Linguagem (LLM) local com a privacidade e especificidade dos seus arquivos PDF.
 
-## ✨ Funcionalidades Principais
+## ✨ Funcionalidades
 
-  * **Arquitetura RAG:** As respostas são baseadas em factos extraídos diretamente dos seus documentos, minimizando alucinações.
-  * **LLM Local:** Executa um Modelo de Linguagem Grande (LLM) localmente usando `llama.cpp`, garantindo total privacidade e controlo.
-  * **Interface Web Intuitiva:** Um frontend de chat simples e limpo que exibe as respostas em tempo real (*streaming*).
-  * **Suporte a Markdown e LaTeX:** As respostas são formatadas com Markdown e suportam fórmulas matemáticas via MathJax.
-  * **Identificação de Fontes:** Cada resposta inclui referências aos documentos e páginas de onde a informação foi extraída.
-  * **Histórico de Conversa:** O assistente "lembra-se" das perguntas anteriores na mesma sessão para fornecer respostas contextuais.
+- **Arquitetura RAG Local**: Respostas geradas estritamente com base nos seus documentos, minimizando alucinações e garantindo privacidade.
+- **LLM & Embeddings Locais**: Executa modelos de IA localmente via `llama.cpp` (suporte a GPU/CPU), sem enviar dados para nuvens de terceiros.
+- **Interface Moderna (React)**: Novo frontend desenvolvido em React, Vite e TailwindCSS, com suporte a chat em tempo real (*streaming*), formatação Markdown e fórmulas matemáticas (MathJax).
+- **Gestão de Documentos**: Sistema automático de ingestão de PDFs. Basta colocar os arquivos na pasta, e o sistema gera títulos e indexa o conteúdo automaticamente.
+- **Citações Precisas**: As respostas indicam os documentos e trechos utilizados como fonte.
+- **Histórico e Autenticação**: Sistema de login, registro de usuários e persistência de histórico de conversas.
 
-## ⚙️ Tecnologias Utilizadas
+## ⚙️ Tecnologias
 
-  * **Backend:** FastAPI, Uvicorn, LangChain, Pydantic
-  * **Base de Dados Vetorial:** FAISS
-  * **Frontend:** HTML5, CSS3, JavaScript (com `marked.js` e `MathJax`)
-  * **Servidor de Inferência:** LLaMA.cpp
+### Backend
+- **Python 3.10+** & **FastAPI**: API performática e assíncrona.
+- **LangChain**: Orquestração do fluxo RAG e processamento de texto.
+- **FAISS**: Banco de dados vetorial local de alta performance.
+- **SQLAlchemy (SQLite)**: Gerenciamento de usuários e sessões.
+
+### Frontend
+- **React 19** & **Vite**: Interface rápida e responsiva.
+- **TailwindCSS**: Estilização moderna.
+- **Lucide React**: Ícones visuais.
+
+### IA Core
+- **Llama.cpp**: Servidor de inferência para LLMs (ex: Llama-3, Hermes) e modelos de Embedding (ex: Qwen, Nomic).
 
 ## 📂 Estrutura do Projeto
 
 ```
 ucdb-ia/
-├── app/
-│   ├── api/
-│   │   ├── routes.py       # Endpoints da API (FastAPI)
-│   │   └── schemas.py      # Modelos de dados (Pydantic)
-│   ├── core/
-│   │   ├── config.py       # Configurações globais da aplicação
-│   │   ├── embeddings.py   # Integração com o modelo de embedding
-│   │   ├── llm.py          # Integração com o servidor do LLM
-│   │   └── rag.py          # Lógica principal do RAG
-│   └── utils/
-│       └── logger.py       # Configuração do sistema de logs
-├── embeddings/             # (Gerado automaticamente) Base de dados vetorial FAISS
-├── logs/                   # (Gerado automaticamente) Ficheiros de log
-├── pdfs/                   # Coloque os seus PDFs aqui
-├── static/                 # Ficheiros do frontend
-│   ├── assets/
-│   │   ├── css/style.css
-│   │   └── js/script.js
-│   └── index.html
-├── .env.example            # Exemplo de ficheiro de configuração
-├── main.py                 # Ponto de entrada para iniciar o servidor web
+├── app/                    # Lógica do Backend (FastAPI)
+│   ├── api/                # Rotas e Schemas
+│   ├── core/               # Config (config.py), Segurança, RAG, LLM
+│   └── utils/              # Loggers
+├── frontend/               # Aplicação React (Interface Principal)
+│   ├── src/
+│   │   ├── components/     # Chat, Login, DocumentManager
+│   │   └── services/       # Integração com API
+├── pdfs/                   # Coloque seus documentos PDF aqui
+├── embeddings/             # (Gerado) Índices vetoriais FAISS
+├── ucdb_ia.db              # (Gerado) Banco de dados SQLite
+├── main.py                 # Ponto de entrada do Backend
 └── requirements.txt        # Dependências Python
 ```
 
-
-### Diretório `app/` - O Coração da Aplicação
-
-#### `app/main.py`
-Este ficheiro é responsável por criar e configurar a instância principal da aplicação FastAPI.
-
-`create_app() -> FastAPI:`
-- Responsabilidade: Inicializa a aplicação.
-- Ações:
-  - Chama `setup_logging()` para configurar o sistema de logs.
-  - Cria a instância do FastAPI.
-  - Adiciona `SessionMiddleware` para gerir sessões de utilizador e o histórico de conversas.
-  - Adiciona `CORSMiddleware` para permitir que o frontend (a correr em `localhost:8000`) se comunique com o backend.
-  - Inclui as rotas definidas em `app.api.routes`.
-  - Configura o diretório `static/` para servir os ficheiros do frontend (HTML, CSS, JS).
-
-`startup()`:
-- Responsabilidade: Executa uma ação quando a aplicação arranca.
-- Ações: Regista uma mensagem informativa no log a indicar que o servidor foi iniciado.
-
-#### `app/core/config.py`
-Este ficheiro centraliza todas as configurações da aplicação usando a biblioteca Pydantic.
-
-`class Settings(BaseSettings):`
-- Responsabilidade: Define e carrega todas as variáveis de configuração a partir de um ficheiro `.env` ou de valores padrão.
-- Parâmetros Principais:
-  - `LLM_BASE_URL`: O endereço do servidor `llama-server`.
-  - `MAX_TOKENS`: O número máximo de tokens que o LLM pode gerar numa única resposta.
-  - `TEMPERATURE`, `TOP_P`, `REPETITION_PENALTY`: Parâmetros que controlam a criatividade, diversidade e o nível de repetição das respostas do LLM.
-  - `CHUNK_SIZE`, `CHUNK_OVERLAP`: Define o tamanho dos pedaços de texto e a sobreposição entre eles durante a indexação dos PDFs.
-- Propriedades (`@property`):
-  - `vectorstore_path`, `pdf_path`, `static_path`: Funções que geram os caminhos absolutos para os diretórios importantes, garantindo que as pastas são criadas se não existirem.
-
-#### `app/core/llm.py`
-Este ficheiro contém a classe que se integra com o servidor `llama.cpp`.
-
-`class LlamaServerLLM(LLM):`
-- Responsabilidade: Implementa a interface da LangChain para um LLM, permitindo que a nossa aplicação se comunique com o `llama-server`.
-
-`_call(...) -> str:`
-- Ações:
-  - Define a lista de `stop_tokens`, que são palavras ou símbolos que indicam ao LLM para parar de gerar texto.
-  - Envia um pedido POST para o endpoint `/completions` do `llama-server`, contendo o prompt e todos os parâmetros de geração definidos no `config.py`.
-  - Processa a resposta JSON, extrai o texto gerado e retorna-o.
-
-#### `app/core/embeddings.py`
-Semelhante ao `llm.py`, este ficheiro integra-se com o servidor `llama.cpp` para gerar embeddings.
-
-`class LlamaEmbeddings(Embeddings):`
-- Responsabilidade: Implementa a interface da LangChain para um modelo de embedding.
-- `embed_documents(...)`: Recebe uma lista de textos e faz um pedido ao servidor de embeddings para converter cada texto num vetor.
-- `embed_query(...)`: Recebe uma única string (a pergunta do utilizador) e converte-a num vetor.
-
-#### `app/core/rag.py`
-Este é o ficheiro mais importante, onde toda a lógica do RAG é implementada.
-
-`_gerar_titulo_para_documento(...)`:
-- Responsabilidade: Usa o LLM para ler o início de um novo PDF e gerar um título descritivo que represente a sua área de conhecimento.
-
-`_carregar_manifesto(...)` e `_salvar_manifesto(...)`:
-- Responsabilidade: Funções auxiliares para ler e escrever no ficheiro `manifest.json`, que armazena a relação entre os nomes dos ficheiros PDF e os seus títulos gerados.
-
-`_processar_novos_pdfs(...)`:
-- Responsabilidade: Carrega novos PDFs, gera os seus títulos e divide o seu conteúdo em chunks.
-
-`criar_vectorstore()`:
-- Responsabilidade: Orquestra a criação ou atualização da base de dados vetorial FAISS.
-- Ações:
-  - Verifica se existem novos PDFs na pasta `/pdfs` que ainda não foram processados.
-  - Se a base de dados já existe, carrega-a e adiciona apenas os novos documentos.
-  - Se não existe, processa todos os PDFs, gera os seus embeddings e salva a nova base de dados na pasta `/embeddings`.
-
-`criar_rag_chain(...)`:
-- Responsabilidade: Cria e configura o `ConversationalRetrievalChain` da LangChain.
-- Ações:
-  - Define o `qa_template`, que é o prompt detalhado com todas as instruções para o LLM.
-  - Instancia o `LlamaServerLLM`.
-  - Configura o retriever para usar a base de dados FAISS.
-  - Monta e retorna a chain completa, pronta a ser usada.
-
-#### `app/api/routes.py`
-Define os endpoints da API que o frontend utiliza.
-
-`_initialize_rag()`:
-- Responsabilidade: Função de inicialização que garante que o sistema RAG (a base de dados vetorial e a chain) é carregado apenas uma vez quando a aplicação arranca.
-
-`@router.get("/")`:
-- Responsabilidade: Serve a página principal da aplicação (`index.html`).
-
-`@router.get("/knowledge-areas")`:
-- Responsabilidade: Fornece ao frontend a lista de áreas de conhecimento (os títulos dos PDFs processados) a partir do ficheiro `manifest.json`.
-
-`@router.post("/chat")`:
-- Responsabilidade: É o endpoint principal que lida com a conversa do chat.
-- Ações:
-  - Recebe a mensagem do utilizador.
-  - Recupera o histórico da conversa da sessão do utilizador.
-  - Chama a `rag_chain` com a pergunta e o histórico.
-  - Aplica funções de limpeza (`_limpar_resposta_llm`, `_remover_duplicacao`) para corrigir possíveis erros na resposta do LLM.
-  - Envia a resposta final e as fontes para o frontend através de `StreamingResponse`.
-
-#### `app/utils/logger.py`
-Configura um sistema de logging robusto com a biblioteca Loguru.
-
-`setup_logging()`:
-- Responsabilidade: Define o formato, o nível (DEBUG, INFO, ERROR) e o destino dos logs (a consola e ficheiros no diretório `logs/`).
-
-### Diretório `static/` - A Interface do Utilizador
-
-`index.html`: A estrutura base da página do chat, que inclui a área de mensagens e o campo de introdução de texto.
-
-`assets/css/style.css`: Contém todo o estilo visual da aplicação, definindo as cores, fontes e o layout dos elementos.
-
-`assets/js/script.js`: Contém toda a lógica do frontend.
-- `showWelcomeMessage()`: Ao carregar a página, faz um pedido ao endpoint `/knowledge-areas` e exibe a mensagem de boas-vindas com a lista de tópicos.
-- `handleSendMessage()`: É chamada quando o utilizador clica em "Enviar". Envia a pergunta para o endpoint `/chat` e processa a resposta em stream, atualizando a interface à medida que o texto chega.
-- Utiliza a biblioteca `marked.js` para converter o Markdown recebido do backend em HTML e o `MathJax` para renderizar fórmulas matemáticas.
-
-
-## 🚀 Tutorial de Instalação e Execução
-
-Siga estes passos para configurar e executar o projeto localmente.
+## 🚀 Instalação e Configuração
 
 ### Pré-requisitos
+1. **Python 3.10+**
+2. **Node.js & npm** (para o frontend)
+3. **Llama.cpp (Server)**: Tenha o executável `llama-server` instalado ou compilado.
 
-Antes de começar, garanta que tem o seguinte software instalado:
+### Passo 1: Configurar o Backend
 
-1.  **Python 3.10+**
-2.  **LLaMA.cpp:** Siga o [guia oficial](https://github.com/ggerganov/llama.cpp) para compilar o projeto. O essencial é ter o executável `server` pronto a usar.
+1. Clone o repositório e entre na pasta:
+  ```bash
+  git clone https://github.com/seu-usuario/ucdb-ia.git
+  cd ucdb-ia
+  ```
 
-### Passo 1: Configuração do Projeto
+2. Crie e ative um ambiente virtual:
+  ```bash
+  python -m venv venv
+  # Windows: venv\Scripts\activate
+  # Linux/Mac: source venv/bin/activate
+  ```
 
-1.  **Clone o repositório:**
+3. Instale as dependências:
+  ```bash
+  pip install -r requirements.txt
+  ```
 
-    ```bash
-    git clone https://github.com/seu-usuario/ucdb-ia.git
-    cd ucdb-ia
-    ```
+4. Prepare a pasta de documentos:
+  ```bash
+  mkdir pdfs
+  ```
 
-2.  **Crie e ative um ambiente virtual:**
+### Passo 2: Configurar o Frontend
 
-    ```bash
-    # Linux/macOS
-    python3 -m venv venv
-    source venv/bin/activate
+1. Acesse a pasta do frontend:
+  ```bash
+  cd frontend
+  ```
 
-    # Windows
-    python -m venv venv
-    venv\Scripts\activate
-    ```
+2. Instale as dependências:
+  ```bash
+  npm install
+  ```
 
-3.  **Instale as dependências Python:**
+### Passo 3: Baixar Modelos de IA
+Baixe dois modelos `.gguf` do HuggingFace:
+1. **Modelo de Chat (LLM)**: Ex: `Hermes-3-Llama-3.1-8B.Q4_K_M.gguf`
+2. **Modelo de Embedding**: Ex: `Qwen-Embedding-0.6B.gguf`
 
-    ```bash
-    pip install -r requirements.txt
-    ```
+*Edite `app/core/config.py` se os nomes ou caminhos dos seus modelos forem diferentes.*
 
-4.  **Crie as pastas necessárias:**
+---
 
-    ```bash
-    mkdir pdfs
-    ```
+## 🏃‍♂️ Executando o Sistema
 
-    *As pastas `embeddings` e `logs` serão criadas automaticamente na primeira execução.*
+O sistema opera com 3 serviços simultâneos. Abra **3 terminais** diferentes:
 
-5.  **Adicione os seus documentos:**
-    Coloque todos os ficheiros `.pdf` que servirão como base de conhecimento dentro da pasta `pdfs/`.
-
-6.  **Configure as variáveis de ambiente:**
-    Copie o ficheiro de exemplo e renomeie-o para `.env`.
-
-    ```bash
-    cp .env.example .env
-    ```
-
-    *Não são necessárias alterações no ficheiro `.env` se você seguir os comandos abaixo.*
-
-### Passo 2: Execução dos Servidores
-
-Para que o chat funcione, precisamos de três componentes a serem executados em **três terminais separados**.
-
-#### Terminal 1: Servidor de Embedding
-
-Este servidor é responsável por converter texto em vetores numéricos.
-
+### Terminal 1: Servidor de Embeddings
 ```bash
-# Inicie o servidor de embedding na porta 8081
-# (substitua pelo nome do seu modelo de embedding, se for diferente)
-llama-server -m seu-modelo-de-embedding.gguf --embeddings -ngl 100 --port 8081
-# Caso queira reservar VRAM 
-llama-server -m seu-modelo-de-embedding.gguf --embeddings -ngl 0 --port 8081
-# Não é necessário processar os PDFs instantâneamente.
+llama-server -m caminho/para/Qwen-Embedding.gguf --port 8081 --embedding -ngl 99
 ```
 
-#### Terminal 2: Servidor do LLM (O Cérebro)
-
-Este é o modelo principal que irá gerar as respostas. Recomenda-se o **Llama-3-8B** para um bom equilíbrio entre performance e qualidade no seu hardware.
-
+### Terminal 2: Servidor LLM
 ```bash
-# Inicie o servidor do LLM na porta 8080
-# Substitua pelo caminho do seu modelo .gguf
-llama-server -m ./Meta-Llama-3-8B-Instruct.Q4_K_M.gguf -c 8192 -ngl 100 -fa 1
+llama-server -m caminho/para/Llama-3.gguf --port 8080 -c 8192 -ngl 99 -fa 1
 ```
 
-  * `-c 8192`: Define o tamanho do contexto para 8192 tokens, permitindo respostas mais longas.
-  * `-ngl 100`: Descarrega o máximo de camadas para a GPU, garantindo a máxima velocidade.
-  * `-fa 1`: FlashAttention, otimização que visa acelerar o processo de inferência e reduzir o consumo de memória da GPU, especialmente com sequências de texto longas.
-
-#### Terminal 3: Aplicação UCDB Chat
-
-Este é o servidor web da aplicação.
-
+### Terminal 3: Aplicação Principal
 ```bash
-# Certifique-se de que o seu ambiente virtual (venv) está ativo
 python main.py
 ```
 
-### Passo 3: Aceder à Aplicação
+Para o frontend em desenvolvimento, abra um 4º terminal:
+```bash
+cd frontend && npm run dev
+```
 
-Após iniciar os três servidores, abra o seu navegador e aceda a:
+## 🖥️ Como Usar
 
-**http://localhost:8000**
-
-Na primeira execução, o sistema irá processar e indexar todos os PDFs. Este processo pode demorar alguns minutos, dependendo do número de documentos. Você pode acompanhar o progresso nos logs do terminal onde a aplicação Python está a ser executada. Após a conclusão, o chat estará pronto a ser usado!
-
------
+- **Acesso**: http://localhost:5173 (Dev) ou http://localhost:8000 (Prod)
+- **Login**: admin / admin (mock dev) ou registre um novo usuário
+- **Base de Conhecimento**: PDFs na pasta `pdfs/` são processados automaticamente
+- **Chat**: Selecione uma área e faça sua pergunta
 
 ## 🔧 Configuração Avançada
 
-Pode ajustar o comportamento do LLM editando o ficheiro `app/core/config.py`.
-
-  * `REPETITION_PENALTY`: Aumente este valor (ex: `1.2`) se notar que o modelo está a repetir-se.
-  * `TEMPERATURE`: Aumente para respostas mais criativas, diminua (ex: `0.5`) para respostas mais factuais e diretas.
-  * `RETRIEVAL_K`: O número de *chunks* de texto a serem recuperados dos documentos para cada pergunta. Um valor entre 4 e 6 é geralmente ideal.
+Edite `app/core/config.py`:
+- `CHUNK_SIZE`: Tamanho dos pedaços de texto (padrão: 250)
+- `RETRIEVAL_K`: Quantidade de trechos buscados (padrão: 5)
+- `TEMPERATURE`: Criatividade do modelo (0.0 a 1.0)
