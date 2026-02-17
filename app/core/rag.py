@@ -162,34 +162,34 @@ def atualizar_base_de_conhecimento():
                 logger.info(f"🧠 [{i}/{len(pendentes)}] Analisando: {arq}")
                 loader = PyPDFLoader(os.path.join(origem, arq))
                 
-                # Limite de 10 páginas para performance
-                full_docs = loader.load()
-                raw_docs = full_docs[:10] 
+                # 1. Carrega TUDO (sem fatiar aqui)
+                full_docs = loader.load() 
                 
-                if len(full_docs) > 10:
-                    logger.info(f"   ✂️ Limitado a 10 páginas (Original: {len(full_docs)} pgs)")
-
-                # Gera título usando apenas o começo do texto
-                texto_completo = " ".join([d.page_content for d in raw_docs[:2]]) # Apenas 2 primeiras pgs para titulo
-                titulo_gerado = _gerar_topico_documento(texto_completo)
+                # 2. Cria uma amostra APENAS para o título (ex: 3 páginas)
+                # Isso economiza tempo do LLM na hora de dar nome, sem perder conteúdo do vetor
+                amostra_titulo = full_docs[:3] 
+                texto_para_titulo = " ".join([d.page_content for d in amostra_titulo])
                 
+                titulo_gerado = _gerar_topico_documento(texto_para_titulo)
                 logger.info(f"   🏷️ Título Gerado: {titulo_gerado}")
 
-                for d in raw_docs:
+                # 3. Adiciona metadados em TODAS as páginas
+                for d in full_docs:
                     d.metadata["source"] = arq
                     d.metadata["area"] = nome_pasta
                     d.metadata["topic"] = titulo_gerado
                 
-                chunks = text_splitter.split_documents(raw_docs)
+                # 4. Vetoriza o documento COMPLETO (full_docs)
+                chunks = text_splitter.split_documents(full_docs)
                 docs_para_indexar.extend(chunks)
                 
                 manifesto[arq] = {
                     "status": "indexed",
                     "title": titulo_gerado,
-                    "pages_indexed": len(raw_docs),
+                    "pages_indexed": len(full_docs), # Agora mostrará o total real
                     "last_updated": "now"
                 }
-
+                
             except Exception as e:
                 logger.error(f"❌ Erro ao processar {arq}: {e}")
 

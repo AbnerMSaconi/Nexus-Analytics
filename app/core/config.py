@@ -22,9 +22,9 @@ class Settings(BaseSettings):
     REPETITION_PENALTY: float = 1.05 # Llama 3.1 repete menos, penalidade leve
 
     # RAG
-    CHUNK_SIZE: int = 250      
+    CHUNK_SIZE: int = 1000      
     CHUNK_OVERLAP: int = 100
-    RETRIEVAL_K: int = 5        
+    RETRIEVAL_K: int = 10        
 
     # CAMINHOS
     BASE_DIR: str = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
