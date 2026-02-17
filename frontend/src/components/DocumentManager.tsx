@@ -1,23 +1,69 @@
 import React, { useState, useEffect } from 'react';
-import { Folder, FileText, Upload, Search, Database } from 'lucide-react';
+import { Folder, FileText, Upload, Search, Database, RefreshCw, AlertCircle } from 'lucide-react'; // Adicionados ícones
 import { StorageService } from '../services/storageService';
 import type { Folder as FolderType } from '../types';
+import { api } from '../assets/api'; // Importação da API atualizada
 
 export const DocumentManager: React.FC = () => {
   const [folders, setFolders] = useState<FolderType[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
+  
+  // Novos estados para feedback visual
+  const [ingesting, setIngesting] = useState(false);
+  const [statusMsg, setStatusMsg] = useState('');
 
   useEffect(() => {
     loadData();
   }, []);
 
   const loadData = async () => {
-    const data = await StorageService.getFolders();
-    setFolders(data);
+    try {
+      const data = await StorageService.getFolders();
+      setFolders(data);
+    } catch (error) {
+      console.error("Erro ao carregar:", error);
+    }
+  };
+
+  // --- LÓGICA DE PERMISSÃO ---
+  const getUserData = () => {
+    try {
+      const userStr = localStorage.getItem('nexus_user');
+      return userStr ? JSON.parse(userStr) : null;
+    } catch { return null; }
+  };
+
+  const user = getUserData();
+  const canIngest = user && ['professor', 'coordenador', 'administrador', 'admin'].includes(user.role);
+
+  // --- AÇÃO DE INGESTÃO ---
+  const handleIngest = async () => {
+    const token = localStorage.getItem('nexus_token');
+    if (!canIngest || !token) {
+        setStatusMsg("Erro: Sem permissão ou sessão inválida.");
+        return;
+    }
+
+    setIngesting(true);
+    setStatusMsg('Processando documentos no servidor...');
+
+    try {
+      // Chama o método específico criado no api.ts
+      await api.ingestDocuments(token);
+      
+      setStatusMsg('Sucesso! Base atualizada.');
+      await loadData(); // Recarrega a lista para mostrar novos arquivos
+      
+      setTimeout(() => setStatusMsg(''), 4000);
+    } catch (error: any) {
+      console.error(error);
+      setStatusMsg(`Erro: ${error.message}`);
+    } finally {
+      setIngesting(false);
+    }
   };
 
   const getFileIcon = (type: string) => {
-    // Determine color based on extension
     switch (type) {
       case 'pdf': return 'text-red-400';
       case 'xlsx': return 'text-green-400';
@@ -47,10 +93,31 @@ export const DocumentManager: React.FC = () => {
           </p>
         </div>
         
-        <button className="bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-colors border border-slate-600">
-          <Upload className="w-4 h-4" />
-          Ingerir Novos Arquivos
-        </button>
+        {/* Renderização Condicional do Botão */}
+        {canIngest && (
+          <div className="flex flex-col items-end gap-2">
+            <button 
+              onClick={handleIngest}
+              disabled={ingesting}
+              className={`
+                px-4 py-2 rounded-lg flex items-center gap-2 transition-colors border 
+                ${ingesting 
+                  ? 'bg-slate-800 text-slate-500 border-slate-700 cursor-not-allowed' 
+                  : 'bg-slate-700 hover:bg-slate-600 text-white border-slate-600'}
+              `}
+            >
+              {ingesting ? <RefreshCw className="w-4 h-4 animate-spin"/> : <Upload className="w-4 h-4"/>}
+              {ingesting ? 'Ingerindo...' : 'Ingerir Novos Arquivos'}
+            </button>
+            
+            {statusMsg && (
+              <span className={`text-xs flex items-center gap-1 ${statusMsg.includes('Erro') ? 'text-red-400' : 'text-green-400'}`}>
+                {statusMsg.includes('Erro') && <AlertCircle className="w-3 h-3"/>}
+                {statusMsg}
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="mb-6 relative">
@@ -102,7 +169,6 @@ export const DocumentManager: React.FC = () => {
                        </span>
                     </div>
                   </div>
-                  {/* Preview of content for debug purposes - showing snippets */}
                   <div className="mt-2 text-xs text-slate-500 pl-8 line-clamp-1 italic">
                     Preview: "{doc.content.substring(0, 80)}..."
                   </div>

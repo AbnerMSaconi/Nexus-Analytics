@@ -1,116 +1,210 @@
 from fastapi import APIRouter, Request, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from app.api import schemas, models
-from app.core.config import settings
-from app.core import security
-from app.core.security import get_current_user
-from app.core.database import get_db, SessionLocal
-from app.utils.logger import logger
-from app.core.rag import get_rag_chain
-from langchain_core.messages import HumanMessage, AIMessage
-import os
+from typing import List, Optional
 import json
-import uuid
+import os
+import logging
+
+# Imports do Projeto
+from app.api import schemas, models
+from app.core import security
+from app.core.database import get_db, SessionLocal
+from app.core.rag import get_rag_chain, atualizar_base_de_conhecimento
+from app.core.config import settings
+from app.core.security import get_current_user, encrypt_message, decrypt_message
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
-# --- AUTENTICAÇÃO ---
+# ==============================================================================
+# 1. SISTEMA DE LOG E GATILHOS DE SEGURANÇA (AUDITORIA)
+# ==============================================================================
+
+def log_activity(db: Session, user: models.User, activity: str, status_log: str, details: str = None):
+    """
+    Registra logs no banco e dispara gatilhos de bloqueio se houver falhas repetidas.
+    """
+    try:
+        # Cria o log
+        new_log = models.AccessLog(
+            user_id=user.id,
+            activity=activity,
+            status=status_log,
+            details=details
+        )
+        db.add(new_log)
+        
+        # Verifica Gatilho de Bloqueio (5 falhas consecutivas)
+        if status_log in ["ERROR", "CRITICAL", "ACCESS_DENIED"]:
+            if hasattr(user, 'failed_attempts'):
+                user.failed_attempts += 1
+                if user.failed_attempts >= 5:
+                    user.is_blocked = True
+                    db.add(models.AccessLog(
+                        user_id=user.id,
+                        activity="AUTO_BLOCK_TRIGGERED",
+                        status="CRITICAL",
+                        details="Usuario bloqueado automaticamente apos 5 atividades suspeitas."
+                    ))
+        elif activity == "LOGIN_SUCCESS":
+            # Reseta falhas ao logar com sucesso
+            if hasattr(user, 'failed_attempts'):
+                user.failed_attempts = 0
+                
+        db.commit()
+    except Exception as e:
+        logger.error(f"Falha ao registrar log de auditoria: {e}")
+
+# ==============================================================================
+# 2. ROTAS DE AUTENTICAÇÃO E PERFIL
+# ==============================================================================
 
 @router.post("/signup", response_model=schemas.Token)
 async def signup(user_in: schemas.UserCreate, db: Session = Depends(get_db)):
+    """
+    Registra um novo usuário.
+    """
     user = db.query(models.User).filter(models.User.external_id == user_in.external_id).first()
     if user:
-        raise HTTPException(status_code=400, detail="ID já cadastrado.")
+        raise HTTPException(status_code=400, detail="ID/Usuário já cadastrado.")
     
     hashed_pw = security.get_password_hash(user_in.password)
+    
     new_user = models.User(
         external_id=user_in.external_id,
         full_name=user_in.full_name,
         password_hash=hashed_pw,
-        role=user_in.role
+        role=user_in.role,
+        course=user_in.course
     )
+    
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
     
-    access_token = security.create_access_token(data={"sub": new_user.external_id, "role": new_user.role})
-    return {"access_token": access_token, "token_type": "bearer"}
+    log_activity(db, new_user, "USER_REGISTER", "INFO", "Novo usuário registrado.")
+    
+    access_token = security.create_access_token(
+        data={"sub": new_user.external_id, "role": new_user.role, "course": new_user.course}
+    )
+    return {
+        "access_token": access_token, 
+        "token_type": "bearer",
+        "role": new_user.role,
+        "course": new_user.course
+    }
 
 @router.post("/login", response_model=schemas.Token)
 async def login(user_in: schemas.UserLogin, db: Session = Depends(get_db)):
     user = db.query(models.User).filter(models.User.external_id == user_in.external_id).first()
-    if not user or not security.verify_password(user_in.password, user.password_hash):
+    
+    if not user:
+        raise HTTPException(status_code=401, detail="Credenciais inválidas.")
+
+    # Verificação de Bloqueio
+    if user.is_blocked:
+        log_activity(db, user, "LOGIN_ATTEMPT_BLOCKED", "WARNING", "Tentativa de acesso em conta bloqueada")
+        raise HTTPException(status_code=403, detail="Conta bloqueada. Contate o administrador.")
+
+    # Verificação de Senha
+    if not security.verify_password(user_in.password, user.password_hash):
+        log_activity(db, user, "LOGIN_FAILED", "ERROR", "Senha incorreta")
         raise HTTPException(status_code=401, detail="Credenciais inválidas.")
     
-    access_token = security.create_access_token(data={"sub": user.external_id, "role": user.role})
-    return {"access_token": access_token, "token_type": "bearer"}
+    # Sucesso
+    log_activity(db, user, "LOGIN_SUCCESS", "INFO", "Login realizado com sucesso")
+    
+    access_token = security.create_access_token(
+        data={"sub": user.external_id, "role": user.role, "course": user.course}
+    )
+    return {
+        "access_token": access_token, 
+        "token_type": "bearer",
+        "role": user.role,
+        "course": user.course
+    }
 
 @router.get("/me")
 async def read_users_me(current_user: models.User = Depends(get_current_user)):
     return {
         "id": current_user.external_id,
-        "username": current_user.full_name,
-        "role": current_user.role
+        "username": current_user.external_id,
+        "full_name": current_user.full_name,
+        "role": current_user.role,
+        "course": current_user.course
     }
 
-# --- DADOS E CHAT ---
+# ==============================================================================
+# 3. ROTAS DE DADOS E GESTÃO
+# ==============================================================================
 
 @router.get("/knowledge-areas")
 async def get_knowledge_areas():
     """
-    Retorna estrutura completa: Áreas -> Documentos -> Títulos IA
-    Lê os arquivos manifest.json gerados pelo processo de ingestão.
+    Retorna a estrutura de pastas e documentos (usado pelo DocumentManager).
     """
     try:
         base = settings.vectorstore_path
         if not os.path.exists(base): return {"data": []}
         
         result = []
-        # Lista apenas diretórios que começam com 'index_'
         dirs = [d for d in os.listdir(base) if d.startswith("index_")]
         
         for d in sorted(dirs):
-            # Formata o nome da área (ex: index_engenharia -> Engenharia)
             area_name = d.replace("index_", "").replace("_", " ").capitalize()
             manifest_path = os.path.join(base, d, "manifest.json")
-            
             documents = []
             
-            # Se existe um manifesto, lê os metadados reais (títulos da IA)
             if os.path.exists(manifest_path):
                 try:
                     with open(manifest_path, "r", encoding="utf-8") as f:
                         data = json.load(f)
-                        # O manifesto é um dict: { "arquivo.pdf": { "title": "...", ... } }
                         for filename, meta in data.items():
                             if isinstance(meta, dict):
                                 documents.append({
                                     "filename": filename,
-                                    "title": meta.get("title", filename), # Usa o título da IA ou nome do arquivo
+                                    "title": meta.get("title", filename),
                                     "pages": meta.get("pages_indexed", 0),
                                     "updated": meta.get("last_updated", "")
                                 })
                 except Exception as e:
-                    logger.error(f"Erro lendo manifesto de {area_name}: {e}")
+                    logger.error(f"Erro lendo manifesto: {e}")
             
-            # Adiciona mesmo se não tiver documentos (para mostrar a pasta vazia)
-            result.append({
-                "area": area_name,
-                "documents": documents
-            })
+            result.append({"area": area_name, "documents": documents})
             
         return {"data": result}
     except Exception as e:
         logger.error(f"Erro ao listar áreas: {e}")
         return {"data": []}
 
+@router.post("/ingest")
+async def ingest_files(current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """
+    Gatilho manual para processamento de documentos (Restrito).
+    """
+    if current_user.role == "aluno":
+        log_activity(db, current_user, "ACCESS_DENIED_INGEST", "WARNING", "Aluno tentou ingerir documentos.")
+        raise HTTPException(status_code=403, detail="Permissão negada.")
+    
+    log_activity(db, current_user, "INGEST_START", "INFO", "Usuario iniciou ingestao.")
+    
+    try:
+        atualizar_base_de_conhecimento()
+        return {"status": "success", "message": "Ingestão concluída."}
+    except Exception as e:
+        logger.error(f"Erro na ingestão: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ==============================================================================
+# 4. CHAT E CONVERSAS (SECURE & ENCRYPTED)
+# ==============================================================================
+
 @router.get("/conversations")
 async def get_conversations(current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
-    convs = db.query(models.Conversation).filter(
+    return db.query(models.Conversation).filter(
         models.Conversation.user_id == current_user.id
     ).order_by(models.Conversation.updated_at.desc()).all()
-    return convs
 
 @router.delete("/conversations/{conversation_id}")
 async def delete_conversation(
@@ -128,50 +222,59 @@ async def delete_conversation(
     
     db.delete(conversation)
     db.commit()
-    return {"status": "success", "message": "Conversa removida"}
+    return {"status": "success"}
 
 @router.post("/chat")
 async def chat(request: Request, body: schemas.ChatRequest, db: Session = Depends(get_db)):
-    current_user = None
+    # 1. Validação Manual do Token
     try:
         auth_header = request.headers.get('Authorization')
-        if auth_header:
-            token = auth_header.split(" ")[1]
-            payload = security.jwt.decode(token, settings.SECRET_KEY, algorithms=[security.ALGORITHM])
-            user_id = payload.get("sub")
-            current_user = db.query(models.User).filter(models.User.external_id == user_id).first()
-    except: pass
+        if not auth_header: raise Exception("Token ausente")
+        token = auth_header.split(" ")[1]
+        payload = security.jwt.decode(token, settings.SECRET_KEY, algorithms=[security.ALGORITHM])
+        user_id = payload.get("sub")
+        current_user = db.query(models.User).filter(models.User.external_id == user_id).first()
+        
+        if not current_user or current_user.is_blocked:
+            raise Exception("Usuario bloqueado ou invalido")
+    except Exception:
+        return StreamingResponse(iter([f'data: {json.dumps({"type": "error", "content": "Não autorizado."})}\n\n']))
 
-    if not body.message.strip(): return StreamingResponse(iter([]))
-    
+    # 2. RBAC: Restrição de Área por Curso
+    if current_user.role == "aluno" and current_user.course:
+        area_solicitada = body.area.lower()
+        curso_usuario = current_user.course.lower()
+        if area_solicitada != "geral" and area_solicitada != curso_usuario:
+            log_activity(db, current_user, "ACCESS_DENIED_AREA", "WARNING", f"Tentou acessar {body.area}")
+            msg = f"Acesso Negado: Alunos de {current_user.course} não acessam {body.area}."
+            return StreamingResponse(iter([f'data: {json.dumps({"type": "error", "content": msg})}\n\n']))
+
+    log_activity(db, current_user, "CHAT_START", "INFO", f"Chat na area {body.area}")
+
     rag_chain = get_rag_chain(body.area)
     if not rag_chain: 
         return StreamingResponse(iter(['data: {"type": "error", "content": "Índice indisponível."}\n\n']))
 
-    conversation_id = None
-    if current_user:
-        new_conv = models.Conversation(
-            user_id=current_user.id,
-            title=body.message[:40] + "...",
-            area=body.area or "Geral"
-        )
-        db.add(new_conv)
-        db.commit()
-        db.refresh(new_conv)
-        conversation_id = new_conv.id
-        
-        db.add(models.Message(conversation_id=conversation_id, role="user", content=body.message))
-        db.commit()
+    # 3. Cria Conversa e Mensagem
+    new_conv = models.Conversation(
+        user_id=current_user.id,
+        title=body.message[:40] + "...",
+        area=body.area or "Geral"
+    )
+    db.add(new_conv)
+    db.commit()
+    
+    encrypted_input = encrypt_message(body.message)
+    db.add(models.Message(conversation_id=new_conv.id, role="user", content=encrypted_input))
+    db.commit()
 
     async def event_stream():
         full_answer = ""
         source_documents = []
         try:
-            history_lc = [] 
-            
             yield f"data: {json.dumps({'type': 'start'})}\n\n"
-
-            async for chunk in rag_chain.astream({"question": body.message, "chat_history": history_lc}):
+            
+            async for chunk in rag_chain.astream({"question": body.message, "chat_history": []}):
                 if "answer" in chunk:
                     token = chunk["answer"]
                     full_answer += token
@@ -184,10 +287,9 @@ async def chat(request: Request, body: schemas.ChatRequest, db: Session = Depend
                 for d in source_documents:
                     full_path = d.metadata.get("source", "")
                     filename = os.path.basename(full_path)
-                    
                     try:
                         relative_path = os.path.relpath(full_path, settings.pdf_path)
-                    except ValueError:
+                    except:
                         relative_path = filename
 
                     if filename not in unique_sources:
@@ -198,15 +300,100 @@ async def chat(request: Request, body: schemas.ChatRequest, db: Session = Depend
                         }
                 yield f"data: {json.dumps({'type': 'sources', 'content': list(unique_sources.values())}, ensure_ascii=False)}\n\n"
 
-            if conversation_id:
-                with SessionLocal() as db2:
-                    db2.add(models.Message(conversation_id=conversation_id, role="ai", content=full_answer))
-                    db2.commit()
-
+            with SessionLocal() as db2:
+                encrypted_output = encrypt_message(full_answer)
+                db2.add(models.Message(conversation_id=new_conv.id, role="ai", content=encrypted_output))
+                db2.commit()
+            
             yield f"data: {json.dumps({'type': 'complete'})}\n\n"
 
         except Exception as e:
-            logger.error(f"Erro: {e}")
+            logger.error(f"Erro no chat: {e}")
+            with SessionLocal() as db_err:
+                u = db_err.query(models.User).filter(models.User.id == current_user.id).first()
+                log_activity(db_err, u, "SYSTEM_ERROR", "ERROR", str(e))
             yield f"data: {json.dumps({'type': 'error', 'content': 'Erro interno.'})}\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+# ==============================================================================
+# 5. ROTAS DE ADMINISTRADOR (COMPLETAS)
+# ==============================================================================
+
+@router.get("/admin/users", response_model=List[schemas.UserResponse])
+async def list_users_admin(current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if current_user.role != "administrador":
+        raise HTTPException(status_code=403, detail="Acesso restrito a administradores.")
+    return db.query(models.User).all()
+
+@router.delete("/admin/users/{user_id}")
+async def delete_user(user_id: str, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    # 1. Permissão
+    if current_user.role != "administrador":
+        raise HTTPException(status_code=403, detail="Acesso restrito.")
+
+    # 2. Busca Usuário
+    user_to_delete = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user_to_delete:
+        raise HTTPException(status_code=404, detail="Usuário não encontrado.")
+
+    # 3. Proteção Auto-Exclusão
+    if user_to_delete.id == current_user.id:
+        raise HTTPException(status_code=400, detail="Você não pode excluir sua própria conta.")
+
+    # 4. Exclusão
+    try:
+        # Remove logs e conversas associadas (se não tiver cascade no banco)
+        db.query(models.AccessLog).filter(models.AccessLog.user_id == user_id).delete()
+        db.query(models.Conversation).filter(models.Conversation.user_id == user_id).delete()
+        
+        db.delete(user_to_delete)
+        db.commit()
+        
+        log_activity(db, current_user, "ADMIN_DELETE_USER", "WARNING", f"Excluiu usuário {user_to_delete.external_id}")
+        return {"status": "success", "message": "Usuário excluído com sucesso."}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Erro ao excluir: {str(e)}")
+
+@router.put("/admin/users/{user_id}/role")
+async def update_user_role(
+    user_id: str, 
+    role_data: schemas.UserRoleUpdate, 
+    current_user: models.User = Depends(get_current_user), 
+    db: Session = Depends(get_db)
+):
+    if current_user.role != "administrador":
+        raise HTTPException(status_code=403, detail="Acesso restrito.")
+    
+    user_target = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user_target:
+        raise HTTPException(404, detail="Usuário não encontrado.")
+    
+    # Proteção: não deixar admin se rebaixar
+    if user_target.id == current_user.id and role_data.role != "administrador":
+         raise HTTPException(400, detail="Você não pode alterar seu próprio cargo de administrador.")
+
+    old_role = user_target.role
+    user_target.role = role_data.role
+    db.commit()
+    
+    log_activity(db, current_user, "ADMIN_ROLE_CHANGE", "INFO", f"Alterou {user_target.external_id} de {old_role} para {role_data.role}")
+    return {"status": "success", "message": f"Cargo alterado para {role_data.role}"}
+
+@router.post("/admin/unblock/{user_id}")
+async def unblock_user(user_id: str, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if current_user.role != "administrador":
+        raise HTTPException(status_code=403, detail="Acesso restrito.")
+        
+    user_target = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user_target:
+        raise HTTPException(404, "Usuário não encontrado")
+        
+    user_target.is_blocked = False
+    if hasattr(user_target, 'failed_attempts'):
+        user_target.failed_attempts = 0
+        
+    db.commit()
+    log_activity(db, current_user, "ADMIN_UNBLOCK", "INFO", f"Desbloqueou usuário {user_target.external_id}")
+    return {"message": "Usuário desbloqueado"}

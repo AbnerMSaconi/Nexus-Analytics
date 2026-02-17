@@ -1,8 +1,16 @@
 export interface User {
-  id: string;
-  username: string;
-  role: 'admin' | 'user';
-  lastLogin: Date;
+  id: string;            // ID interno (uuid)
+  username: string;      // ou external_id
+  full_name?: string;
+  role: string;          // 'aluno' | 'professor' | 'administrador' ...
+  course?: string;       // 'Direito', 'Engenharia'...
+  token?: string;
+}
+
+export interface AuthState {
+  isAuthenticated: boolean;
+  user: User | null;
+  token: string | null;
 }
 
 export interface Document {
@@ -43,10 +51,4 @@ export interface ChatSession {
   messages: Message[];
   createdAt: Date;
   updatedAt: Date;
-}
-
-export interface AuthState {
-  isAuthenticated: boolean;
-  user: User | null;
-  token: string | null;
 }
