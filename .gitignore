@@ -92,3 +92,5 @@ embeddings/
 
 
 pdfs/
+.aider.tags.cache.v4/
+node_modules/
