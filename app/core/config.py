@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     
     # PARAMETROS DO MODELO (Hermes 3)
     MAX_TOKENS: int = 8192      
-    TEMPERATURE: float = 0.3    # Hermes é criativo, 0.3 segura alucinações
+    TEMPERATURE: float = 0.5    # Hermes é criativo, 0.3 segura alucinações
     TOP_P: float = 0.90
     REPETITION_PENALTY: float = 1.05 # Llama 3.1 repete menos, penalidade leve
 

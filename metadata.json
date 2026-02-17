@@ -1,0 +1,5 @@
+{
+  "name": "Copy of Nexus RAG - Corporate Knowledge Base",
+  "description": "A secure, modular RAG system interface designed for local LLM integration. Features document organization by sector, persistent chat history, and source citation.",
+  "requestFramePermissions": []
+}

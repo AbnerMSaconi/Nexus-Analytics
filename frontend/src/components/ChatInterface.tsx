@@ -21,6 +21,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ user }) => {
   const [input, setInput] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null); // REF PARA O TEXTAREA
 
   useEffect(() => {
     loadSessions();
@@ -32,6 +33,18 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ user }) => {
       window.MathJax.typesetPromise().catch((err: any) => console.log('MathJax error:', err));
     }
   }, [sessions, isProcessing]);
+
+  // EFEITO DE AUTOGROW (Crescimento Automático)
+  useEffect(() => {
+    if (textareaRef.current) {
+      // 1. Reseta a altura para calcular o scrollHeight real (caso apague texto)
+      textareaRef.current.style.height = 'auto';
+      
+      // 2. Define a nova altura baseada no conteúdo, limitando visualmente via CSS max-h
+      // O scrollHeight inclui o padding. 
+      textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
+    }
+  }, [input]);
 
   const loadSessions = async () => {
     const loadedSessions = await StorageService.getSessions(user.id);
@@ -92,6 +105,18 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ user }) => {
     }
   };
 
+  // HANDLER PARA TECLA ENTER
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Se apertar Enter (sem Shift) e tiver texto, envia
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault(); // Evita pular linha
+      if (input.trim() && !isProcessing) {
+        // Dispara o evento de submit do formulário manualmente
+        handleSendMessage(e as unknown as React.FormEvent);
+      }
+    }
+  };
+
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim() || !currentSessionId) return;
@@ -99,6 +124,11 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ user }) => {
     const userText = input;
     setInput('');
     setIsProcessing(true);
+
+    // Reseta altura do textarea forçadamente após envio
+    if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto';
+    }
 
     const userMsg: Message = {
       id: crypto.randomUUID(),
@@ -125,9 +155,6 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ user }) => {
 
     try {
       const token = localStorage.getItem('nexus_token');
-      
-      // --- CORREÇÃO PRINCIPAL ---
-      // Agora chamamos a API passando "Geral" e o token, em vez de enviar documentos brutos.
       const aiResponse = await generateRAGResponse(userText, "Geral", token);
 
       const botMsg: Message = {
@@ -255,7 +282,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ user }) => {
                         )}
                       </div>
 
-                      {/* AREA DE CITAÇÕES (LINKS CORRIGIDOS) */}
+                      {/* AREA DE CITAÇÕES */}
                       {msg.role === 'assistant' && msg.citations && msg.citations.length > 0 && (
                         <div className="bg-slate-900/50 rounded-lg p-3 border border-slate-800">
                           <p className="text-xs font-semibold text-slate-500 mb-2 flex items-center gap-1">
@@ -304,27 +331,32 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ user }) => {
               <div ref={messagesEndRef} />
             </div>
 
-            {/* Input Area */}
+            {/* Input Area (Agora com Textarea Auto-Grow) */}
             <div className="p-4 bg-slate-900 border-t border-slate-800">
-              <form onSubmit={handleSendMessage} className="max-w-4xl mx-auto relative">
-                <input
-                  type="text"
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  placeholder="Faça uma pergunta sobre os documentos..."
-                  disabled={isProcessing}
-                  className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl py-4 pl-6 pr-14 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 shadow-lg disabled:opacity-50"
-                />
-                <button 
-                  type="submit" 
-                  disabled={!input.trim() || isProcessing}
-                  className="absolute right-3 top-3 p-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors disabled:bg-slate-700 disabled:cursor-not-allowed"
-                >
-                  <Send className="w-5 h-5" />
-                </button>
+              <form onSubmit={handleSendMessage} className="max-w-4xl mx-auto relative flex items-end">
+                <div className="relative w-full">
+                  <textarea
+                    ref={textareaRef}
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    placeholder="Faça uma pergunta sobre os documentos..."
+                    disabled={isProcessing}
+                    rows={1}
+                    className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl py-4 pl-6 pr-14 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 shadow-lg disabled:opacity-50 resize-none overflow-hidden max-h-[140px] overflow-y-auto block leading-normal"
+                    style={{ minHeight: '58px' }} // Altura mínima consistente
+                  />
+                  <button 
+                    type="submit" 
+                    disabled={!input.trim() || isProcessing}
+                    className="absolute right-3 bottom-3 p-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors disabled:bg-slate-700 disabled:cursor-not-allowed"
+                  >
+                    <Send className="w-5 h-5" />
+                  </button>
+                </div>
               </form>
               <div className="text-center mt-2 text-[10px] text-slate-600">
-                Nexus AI pode cometer erros. Verifique as fontes listadas.
+                UCDB-IA pode cometer erros. Verifique as fontes listadas.
               </div>
             </div>
           </>
