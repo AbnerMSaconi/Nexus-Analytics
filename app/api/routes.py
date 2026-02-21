@@ -5,6 +5,9 @@ from typing import List, Optional
 import json
 import os
 import logging
+from fastapi import UploadFile, File, Form
+import shutil
+from pathlib import Path
 
 # Imports do Projeto
 from app.api import schemas, models
@@ -195,7 +198,47 @@ async def ingest_files(current_user: models.User = Depends(get_current_user), db
     except Exception as e:
         logger.error(f"Erro na ingestão: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+@router.post("/admin/upload")
+async def upload_files_to_area(
+    area: str = Form(...),
+    files: List[UploadFile] = File(...),
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Recebe 1 ou mais arquivos e processa apenas para a área de conhecimento especificada.
+    """
+    # 1. Permissões
+    if current_user.role not in ["administrador", "professor", "coordenador"]:
+        raise HTTPException(status_code=403, detail="Sem permissão para upload.")
 
+    # 2. Sanitiza o nome da área (Ex: "Direito Penal" -> "direito_penal")
+    area_clean = area.lower().strip().replace(" ", "_")
+    
+    # 3. Prepara o diretório físico para salvar os PDFs brutos
+    base_dir = Path(settings.pdf_path) / area_clean
+    base_dir.mkdir(parents=True, exist_ok=True)
+    
+    saved_files = []
+    
+    # 4. Salva os arquivos no disco
+    for file in files:
+        file_path = base_dir / file.filename
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        saved_files.append(str(file_path))
+        
+    log_activity(db, current_user, "FILE_UPLOAD", "INFO", f"Enviou {len(files)} arquivos para a área {area}")
+    
+    # 5. Chama o pipeline de vetorização específico
+    from app.core.rag import processar_area_especifica # Nova função que você deverá criar no seu RAG
+    try:
+        # Passamos a área e os caminhos dos novos arquivos para o VectorStore
+        processar_area_especifica(area_clean, saved_files)
+        return {"status": "success", "message": f"{len(files)} arquivos vetorizados na base de {area.capitalize()}."}
+    except Exception as e:
+        logger.error(f"Erro na vetorização: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 # ==============================================================================
 # 4. CHAT E CONVERSAS (SECURE & ENCRYPTED)
 # ==============================================================================
@@ -240,13 +283,40 @@ async def chat(request: Request, body: schemas.ChatRequest, db: Session = Depend
     except Exception:
         return StreamingResponse(iter([f'data: {json.dumps({"type": "error", "content": "Não autorizado."})}\n\n']))
 
-    # 2. RBAC: Restrição de Área por Curso
-    if current_user.role == "aluno" and current_user.course:
-        area_solicitada = body.area.lower()
-        curso_usuario = current_user.course.lower()
-        if area_solicitada != "geral" and area_solicitada != curso_usuario:
-            log_activity(db, current_user, "ACCESS_DENIED_AREA", "WARNING", f"Tentou acessar {body.area}")
-            msg = f"Acesso Negado: Alunos de {current_user.course} não acessam {body.area}."
+    # 2. RBAC: Restrição de Área por Curso (BLINDADO)
+    role_usuario = (current_user.role or "").lower().strip()
+    
+    if role_usuario in ["aluno", "professor"]:
+        area_solicitada = (body.area or "geral").lower().strip()
+        curso_usuario = (current_user.course or "").lower().strip()
+        
+        # 1. Todo aluno/professor tem acesso à base 'Geral'
+        areas_permitidas = ["geral"]
+        
+        # 2. Se o usuário tiver um curso cadastrado, adicionamos à lista de permissões
+        if curso_usuario:
+            areas_permitidas.append(curso_usuario)
+            
+            # 3. Regra de Engenharias e Tecnologias
+            if "engenharia" in curso_usuario or "tecnologia" in curso_usuario:
+                areas_permitidas.extend(["engenharia", "engenharias", "tecnologia", "tecnologias"])
+        
+        # 4. Verifica se o que ele pediu está dentro do que ele pode acessar
+        acesso_concedido = False
+        for permitida in areas_permitidas:
+            # Se a área solicitada for exatamente igual ou contiver a palavra (ex: "engenharias" contém "engenharia")
+            if permitida == area_solicitada or permitida in area_solicitada:
+                acesso_concedido = True
+                break
+                
+        # 5. Se não passou na validação, BLOQUEIA
+        if not acesso_concedido:
+            log_activity(db, current_user, "ACCESS_DENIED_AREA", "WARNING", f"{current_user.role} de {curso_usuario} tentou acessar {body.area}")
+            
+            # Mensagem amigável de erro
+            curso_display = current_user.course if current_user.course else "Geral (Nenhum curso cadastrado)"
+            msg = f"Acesso Negado: {current_user.role.capitalize()}s de {curso_display} não têm permissão para acessar a base de {body.area}."
+            
             return StreamingResponse(iter([f'data: {json.dumps({"type": "error", "content": msg})}\n\n']))
 
     log_activity(db, current_user, "CHAT_START", "INFO", f"Chat na area {body.area}")

@@ -57,10 +57,10 @@ def _sanitizar_resposta(texto: str) -> str:
 def _gerar_topico_documento(texto_bruto: str) -> str:
     """Usa o LLM para dar um nome descritivo ao conteúdo do arquivo."""
     
-    # 1. Reduzimos a amostra e removemos quebras de linha para evitar que o modelo se perca
+    # 1. Reduzimos a amostra e removemos quebras de linha
     amostra = texto_bruto[:1000].replace("\n", " ").strip()
     
-    # 2. Prompt Engenharia Reversa: Pedimos formato específico
+    # 2. Prompt Engenharia Reversa
     system_instruction = """ATENÇÃO: Você é uma API de extração de metadados. 
     Sua ÚNICA função é ler o texto e extrair um Tópico Central de 3 a 6 palavras.
     
@@ -83,27 +83,20 @@ def _gerar_topico_documento(texto_bruto: str) -> str:
         raw_titulo = chain.invoke({"texto_amostra": amostra}).strip()
         
         # 3. Pós-Processamento Brutal (Python)
-        # Remove aspas e caracteres especiais de markdown
         titulo = raw_titulo.replace('"', '').replace("'", "").replace("*", "").replace("#", "")
-        
-        # Remove prefixos comuns que o modelo teima em colocar
         titulo = re.sub(r'^(Título|Tópico|Assunto|Tema|Title|Topic):\s*', '', titulo, flags=re.IGNORECASE)
         
-        # Se o modelo gerou várias linhas, pegamos a primeira linha válida não vazia
         if "\n" in titulo:
             linhas = [l.strip() for l in titulo.split('\n') if l.strip()]
-            # Se a primeira linha for muito longa (provavelmente alucinação), tentamos achar a menor linha
             titulo = min(linhas, key=len) if linhas else "Documento Processado"
 
         # 4. Corte de Segurança Final
-        # Se depois de tudo isso ainda for maior que 60 chars, truncamos ou usamos fallback
         if len(titulo) > 60:
-            # Tenta pegar apenas as primeiras 5 palavras
             palavras = titulo.split()
             if len(palavras) > 5:
                 titulo = " ".join(palavras[:5])
             else:
-                titulo = "Documento Acadêmico" # Desistência se for um texto ininteligível
+                titulo = "Documento Acadêmico"
 
         return titulo.strip()
 
@@ -112,11 +105,11 @@ def _gerar_topico_documento(texto_bruto: str) -> str:
         return "Documento Processado"
 
 # ==============================================================================
-# 3. INGESTÃO BLINDADA (COM LIMITE DE PÁGINAS)
+# 3. INGESTÃO GLOBAL BLINDADA (VARREDURA COMPLETA)
 # ==============================================================================
 
 def atualizar_base_de_conhecimento():
-    logger.info("🔄 Iniciando sincronização INTELIGENTE...")
+    logger.info("🔄 Iniciando sincronização INTELIGENTE global...")
     
     if not os.path.exists(settings.pdf_path):
         os.makedirs(settings.pdf_path)
@@ -147,7 +140,6 @@ def atualizar_base_de_conhecimento():
         
         pendentes = []
         for arq in arquivos:
-            # Re-indexa se não estiver no manifesto ou se não tiver título gerado
             if arq not in manifesto or isinstance(manifesto[arq], str) or "title" not in manifesto[arq]:
                 pendentes.append(arq)
 
@@ -161,32 +153,25 @@ def atualizar_base_de_conhecimento():
             try:
                 logger.info(f"🧠 [{i}/{len(pendentes)}] Analisando: {arq}")
                 loader = PyPDFLoader(os.path.join(origem, arq))
-                
-                # 1. Carrega TUDO (sem fatiar aqui)
                 full_docs = loader.load() 
                 
-                # 2. Cria uma amostra APENAS para o título (ex: 3 páginas)
-                # Isso economiza tempo do LLM na hora de dar nome, sem perder conteúdo do vetor
                 amostra_titulo = full_docs[:3] 
                 texto_para_titulo = " ".join([d.page_content for d in amostra_titulo])
-                
                 titulo_gerado = _gerar_topico_documento(texto_para_titulo)
                 logger.info(f"   🏷️ Título Gerado: {titulo_gerado}")
 
-                # 3. Adiciona metadados em TODAS as páginas
                 for d in full_docs:
                     d.metadata["source"] = arq
                     d.metadata["area"] = nome_pasta
                     d.metadata["topic"] = titulo_gerado
                 
-                # 4. Vetoriza o documento COMPLETO (full_docs)
                 chunks = text_splitter.split_documents(full_docs)
                 docs_para_indexar.extend(chunks)
                 
                 manifesto[arq] = {
                     "status": "indexed",
                     "title": titulo_gerado,
-                    "pages_indexed": len(full_docs), # Agora mostrará o total real
+                    "pages_indexed": len(full_docs),
                     "last_updated": "now"
                 }
                 
@@ -207,6 +192,91 @@ def atualizar_base_de_conhecimento():
                 logger.success(f"💾 Índice '{area_key}' salvo com sucesso.")
             except Exception as index_err:
                 logger.error(f"❌ Erro crítico ao salvar índice FAISS: {index_err}")
+
+# ==============================================================================
+# 3.1. INGESTÃO SELETIVA (APENAS UMA ÁREA E ARQUIVOS ESPECÍFICOS) - NOVO!
+# ==============================================================================
+
+def processar_area_especifica(area: str, caminhos_arquivos: List[str]):
+    """
+    Recebe os caminhos físicos dos arquivos recém-salvos e atualiza APENAS o 
+    vectorstore e o manifesto correspondentes a essa área de conhecimento.
+    """
+    logger.info(f"🔄 Processando {len(caminhos_arquivos)} arquivos para a área: {area}")
+    
+    area_key = _normalizar_nome_area(area)
+    caminho_indice = os.path.join(settings.vectorstore_path, f"index_{area_key}")
+    
+    if not os.path.exists(caminho_indice):
+        os.makedirs(caminho_indice)
+
+    emb_model = get_embeddings()
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=settings.CHUNK_SIZE, chunk_overlap=settings.CHUNK_OVERLAP)
+    
+    manifesto = _carregar_manifesto(caminho_indice)
+    docs_para_indexar = []
+    
+    for arq_path in caminhos_arquivos:
+        nome_arquivo = os.path.basename(arq_path)
+        try:
+            logger.info(f"🧠 Analisando arquivo específico: {nome_arquivo}")
+            loader = PyPDFLoader(arq_path)
+            full_docs = loader.load()
+            
+            if not full_docs:
+                continue
+            
+            # Gera título com uma pequena amostra para economizar tokens
+            amostra_titulo = full_docs[:3]
+            texto_para_titulo = " ".join([d.page_content for d in amostra_titulo])
+            titulo_gerado = _gerar_topico_documento(texto_para_titulo)
+            
+            logger.info(f"   🏷️ Título Gerado: {titulo_gerado}")
+
+            # Adiciona metadados
+            for d in full_docs:
+                d.metadata["source"] = nome_arquivo
+                d.metadata["area"] = area
+                d.metadata["topic"] = titulo_gerado
+                
+            chunks = text_splitter.split_documents(full_docs)
+            docs_para_indexar.extend(chunks)
+            
+            # Atualiza manifesto para exibição no frontend
+            manifesto[nome_arquivo] = {
+                "status": "indexed",
+                "title": titulo_gerado,
+                "pages_indexed": len(full_docs),
+                "last_updated": "now" 
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Erro ao processar {nome_arquivo}: {e}")
+            
+    if docs_para_indexar:
+        try:
+            indice_faiss_path = os.path.join(caminho_indice, "index.faiss")
+            if os.path.exists(indice_faiss_path):
+                # Anexa aos vetores existentes
+                vs_atual = FAISS.load_local(caminho_indice, emb_model, allow_dangerous_deserialization=True)
+                vs_atual.add_documents(docs_para_indexar)
+                vs_atual.save_local(caminho_indice)
+            else:
+                # Cria a nova base do zero
+                vs_novo = FAISS.from_documents(docs_para_indexar, emb_model)
+                vs_novo.save_local(caminho_indice)
+                
+            _salvar_manifesto(caminho_indice, manifesto)
+            logger.info(f"💾 Índice '{area_key}' atualizado/criado com sucesso via modal seletivo.")
+            
+            # Limpa o cache para forçar a recarga no próximo RAG
+            global _vectorstores_cache
+            if caminho_indice in _vectorstores_cache:
+                del _vectorstores_cache[caminho_indice]
+                
+        except Exception as index_err:
+            logger.error(f"❌ Erro crítico ao salvar índice FAISS na área específica: {index_err}")
+            raise index_err
 
 # ==============================================================================
 # 4. CHAT RAG

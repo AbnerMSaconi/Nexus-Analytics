@@ -104,6 +104,30 @@ export const api = {
       throw new Error(err.detail || 'Falha ao atualizar cadastro do usuário');
     }
     return res.json();
+  },
+  // Adicione isso à const api:
+  async uploadDocumentsToArea(area: string, files: File[], token: string) {
+    const formData = new FormData();
+    formData.append('area', area);
+    
+    files.forEach(file => {
+      formData.append('files', file); // O backend espera a chave 'files'
+    });
+
+    const res = await fetch(`${API_URL}/admin/upload`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`
+        // Nota: O Fetch API configura o Content-Type como 'multipart/form-data' automaticamente ao usar FormData
+      },
+      body: formData
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Falha ao fazer upload e processar os arquivos.');
+    }
+    return res.json();
   }
 };
     
