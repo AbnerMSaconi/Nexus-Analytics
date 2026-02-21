@@ -397,3 +397,48 @@ async def unblock_user(user_id: str, current_user: models.User = Depends(get_cur
     db.commit()
     log_activity(db, current_user, "ADMIN_UNBLOCK", "INFO", f"Desbloqueou usuário {user_target.external_id}")
     return {"message": "Usuário desbloqueado"}
+
+@router.put("/admin/users/{user_id}")
+async def update_user_details(
+    user_id: str,
+    user_data: schemas.UserUpdate,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if current_user.role != "administrador":
+        raise HTTPException(status_code=403, detail="Acesso restrito.")
+    
+    user_target = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user_target:
+        raise HTTPException(status_code=404, detail="Usuário não encontrado.")
+    
+    # Valida e atualiza ID/Login
+    if user_data.external_id and user_data.external_id != user_target.external_id:
+        existing = db.query(models.User).filter(models.User.external_id == user_data.external_id).first()
+        if existing:
+            raise HTTPException(status_code=400, detail="Este ID/Login já está em uso por outro usuário.")
+        user_target.external_id = user_data.external_id
+
+    # Atualiza demais campos
+    if user_data.full_name is not None:
+        user_target.full_name = user_data.full_name
+        
+    if user_data.role:
+        if user_target.id == current_user.id and user_data.role != "administrador":
+             raise HTTPException(status_code=400, detail="Você não pode alterar seu próprio cargo de administrador.")
+        user_target.role = user_data.role
+        
+    if user_data.course is not None:
+        user_target.course = user_data.course
+        
+    # Reset de senha
+    if user_data.password:
+        user_target.password_hash = security.get_password_hash(user_data.password)
+
+    try:
+        db.commit()
+        log_activity(db, current_user, "ADMIN_UPDATE_USER", "INFO", f"Atualizou o cadastro do usuário {user_target.external_id}")
+        return {"status": "success", "message": "Usuário atualizado com sucesso"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Erro ao salvar: {str(e)}")

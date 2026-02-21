@@ -88,6 +88,22 @@ export const api = {
       throw new Error(err.detail || 'Falha ao excluir usuário');
     }
     return res.json();
+  },
+  async updateUserDetails(userId: string, data: any, token: string) {
+    const res = await fetch(`http://localhost:8000/admin/users/${userId}`, {
+      method: 'PUT',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(data)
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Falha ao atualizar cadastro do usuário');
+    }
+    return res.json();
   }
 };
     

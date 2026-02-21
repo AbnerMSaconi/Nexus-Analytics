@@ -48,3 +48,10 @@ class UserResponse(BaseModel):
 
 class UserRoleUpdate(BaseModel):
     role: str
+
+class UserUpdate(BaseModel):
+    external_id: Optional[str] = None
+    full_name: Optional[str] = None
+    role: Optional[str] = None
+    course: Optional[str] = None
+    password: Optional[str] = None  # Permite resetar a senha, se preenchido
