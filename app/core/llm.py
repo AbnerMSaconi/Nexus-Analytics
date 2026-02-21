@@ -1,4 +1,5 @@
 from langchain_core.language_models.llms import LLM
+from langchain_openai import ChatOpenAI
 from langchain_core.callbacks import CallbackManagerForLLMRun
 from typing import Any, List, Optional
 import requests
@@ -50,5 +51,12 @@ class LlamaServerLLM(LLM):
     def _identifying_params(self) -> dict[str, Any]:
         return {"endpoint": settings.LLM_BASE_URL}
 
+
+
 def get_llm():
-    return LlamaServerLLM()
+    return ChatOpenAI(
+        base_url=str(settings.LLM_BASE_URL), # <--- A CORREÇÃO É AQUI (adicionar str())
+        api_key="sk-no-key", 
+        max_tokens=settings.MAX_TOKENS,
+        temperature=settings.TEMPERATURE
+    )

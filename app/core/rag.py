@@ -298,21 +298,25 @@ def get_rag_chain(area: str = "Geral"):
         _vectorstores_cache[caminho_indice] = FAISS.load_local(caminho_indice, emb_model, allow_dangerous_deserialization=True)
 
     vectorstore = _vectorstores_cache[caminho_indice]
-    retriever = vectorstore.as_retriever(search_kwargs={"k": 4})
-    llm = get_llm()
-
-    system_msg = r"""Você é o Assistente Especialista da UCDB.
-    Responda usando APENAS o contexto fornecido.
-    Use Markdown para formatar (títulos, listas, negrito).
-    Se houver fórmulas, use LaTeX: $$ x^2 $$.
+    # Usa a variável K do config.py
+    retriever = vectorstore.as_retriever(search_kwargs={"k": settings.RETRIEVAL_K})
     
-    Contexto:"""
+    # 1. Adicionamos "STOP WORDS" para matar a alucinação de chat
+    llm = get_llm().bind(stop=["Human:", "User:", "Question:", "System:", "<|im_end|>", "<|eot_id|>"])
+
+    # 2. Prompt unificado e mais limpo
+    system_msg = """Você é o Assistente Especialista da UCDB.
+Responda à pergunta do usuário baseando-se EXCLUSIVAMENTE nos documentos fornecidos no CONTEXTO abaixo.
+Se a informação não estiver no CONTEXTO, diga apenas: "Não encontrei essa informação nos documentos disponibilizados."
+NUNCA invente diálogos, não faça perguntas e não crie texto além da resposta.
+
+CONTEXTO:
+{context}"""
     
     prompt = ChatPromptTemplate.from_messages([
         ("system", system_msg),
-        ("system", "CONTEXTO:\n{context}"),
         MessagesPlaceholder(variable_name="chat_history"),
-        ("human", "{question}")
+        ("user", "{question}") # Usando "user" em vez de "human"
     ])
     
     chain = (
