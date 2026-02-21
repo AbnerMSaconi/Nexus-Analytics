@@ -95,3 +95,4 @@ pdfs/
 .aider.tags.cache.v4/
 node_modules/
 .aider.*
+ucdb_ia.db
