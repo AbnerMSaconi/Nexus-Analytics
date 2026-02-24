@@ -69,6 +69,7 @@ def _gerar_topico_documento(texto_bruto: str) -> str:
     2. NÃO inicie com "O texto fala sobre...".
     3. Retorne APENAS o título.
     
+    
     Exemplo Entrada: "...O protocolo TCP/IP é a base da internet..."
     Exemplo Saída: Protocolo de Redes TCP/IP"""
 
@@ -305,17 +306,19 @@ def get_rag_chain(area: str = "Geral"):
     llm = get_llm().bind(stop=["Human:", "User:", "Question:", "System:", "<|im_end|>", "<|eot_id|>"])
 
     # 2. Prompt unificado e mais limpo
-    system_msg = """Você é um auditor jurídico da UCDB extremamente rigoroso e literal.
-Sua ÚNICA fonte de verdade é o texto contido estritamente entre as tags <documentos>.
+    system_msg = """Você é um auditor jurídico da UCDB estritamente literal.
+Sua ÚNICA fonte de verdade é o texto contido entre as tags <documentos>.
 
 <documentos>
 {context}
 </documentos>
 
-REGRAS OBRIGATÓRIAS:
-1. Procure a resposta de forma literal apenas dentro da tag <documentos>.
-2. Verifique os números dos artigos. Se o texto recuperado falar sobre um assunto (ex: STF) mas o número do artigo não for EXATAMENTE o que o usuário pediu, você NÃO PODE usá-lo.
-3. NUNCA adivinhe, altere números ou invente textos jurídicos.
+REGRAS DE EXTRAÇÃO (SIGA NA ORDEM):
+1. ANÁLISE: Procure nas tags <documentos> se existe algum Artigo, Parágrafo ou Inciso que responda DIRETAMENTE à pergunta do usuário.
+2. PROIBIÇÃO DE DEDUÇÃO: Você NÃO PODE juntar pedaços de textos diferentes, notas de rodapé ou jurisprudências para "montar" uma resposta. 
+3. RESPOSTA DIRETA: Se a informação existir claramente, responda.
+4. TRAVA DE SEGURANÇA: Se o texto da lei não explicar a resposta de forma clara e direta (por exemplo, se não houver um artigo dizendo explicitamente "a diferença é..."), você é OBRIGADO a parar e responder EXATAMENTE: "Não encontrei essa informação de forma direta e clara nos textos legais disponibilizados."
+5. NUNCA explique conceitos jurídicos usando suas próprias palavras.
 """
     
     prompt = ChatPromptTemplate.from_messages([

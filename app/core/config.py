@@ -1,4 +1,3 @@
-# app/core/config.py
 from pydantic_settings import SettingsConfigDict, BaseSettings
 from pydantic import AnyHttpUrl
 import os
@@ -17,13 +16,13 @@ class Settings(BaseSettings):
     
     # PARAMETROS DO MODELO (Hermes 3)
     MAX_TOKENS: int = 8192      
-    TEMPERATURE: float = 0.1    # Hermes é criativo, 0.3 segura alucinações
+    TEMPERATURE: float = 0.0   # Hermes é criativo, 0.3 segura alucinações
     TOP_P: float = 0.90
     REPETITION_PENALTY: float = 1.05 # Llama 3.1 repete menos, penalidade leve
 
     # RAG
-    CHUNK_SIZE: int = 1500      # Aumenta o tamanho do texto lido por vez
-    CHUNK_OVERLAP: int = 250    # Aumenta a sobreposição para não cortar ideias no meio
+    CHUNK_SIZE: int = 150      # Aumenta o tamanho do texto lido por vez
+    CHUNK_OVERLAP: int = 150    # Aumenta a sobreposição para não cortar ideias no meio
     RETRIEVAL_K: int = 15      
 
     # CAMINHOS
