@@ -96,3 +96,53 @@ if __name__ == "__main__":
     # Aponta para a sua pasta de PDFs
     quebrar_pdf_por_capitulos(settings.pdf_path)
     print("Processo finalizado!")
+
+def quebrar_arquivo_unico(caminho_completo: str) -> list:
+    """
+    Recebe o caminho de um único PDF recém-salvo.
+    Se tiver capítulos, divide, apaga o original e retorna a lista dos novos arquivos.
+    Se não tiver, retorna uma lista com o próprio arquivo original.
+    """
+    arquivos_gerados = []
+    arquivo_nome = os.path.basename(caminho_completo)
+    raiz = os.path.dirname(caminho_completo)
+    
+    try:
+        reader = PdfReader(caminho_completo)
+        total_paginas = len(reader.pages)
+        capitulos = extrair_capitulos(reader)
+        
+        # Se não tem sumário digital ou tem apenas 1 capítulo, não quebra
+        if not capitulos or len(capitulos) < 2:
+            return [caminho_completo]
+            
+        nome_base = os.path.splitext(arquivo_nome)[0]
+        
+        for i, cap_atual in enumerate(capitulos):
+            pagina_inicio = cap_atual["pagina"]
+            pagina_fim = capitulos[i + 1]["pagina"] if i + 1 < len(capitulos) else total_paginas
+                
+            if pagina_inicio >= pagina_fim:
+                continue
+                
+            writer = PdfWriter()
+            for num_pagina in range(pagina_inicio, pagina_fim):
+                writer.add_page(reader.pages[num_pagina])
+                
+            titulo_seguro = limpar_nome_arquivo(cap_atual["titulo"])
+            nome_saida = f"{nome_base}_parte_{i+1:03d}_{titulo_seguro}.pdf"
+            caminho_saida = os.path.join(raiz, nome_saida)
+            
+            with open(caminho_saida, "wb") as f_saida:
+                writer.write(f_saida)
+                
+            arquivos_gerados.append(caminho_saida)
+            
+        # Remove o arquivo original gigante do disco para não ficar duplicado
+        os.remove(caminho_completo) 
+        return arquivos_gerados
+        
+    except Exception as e:
+        print(f"❌ Erro ao tentar fatiar arquivo único '{arquivo_nome}': {e}")
+        # Se der erro no fatiamento, devolve o arquivo original para o RAG indexar
+        return [caminho_completo]

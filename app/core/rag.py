@@ -19,6 +19,7 @@ from app.utils.logger import logger
 from app.core.config import settings
 from app.core.embeddings import get_embeddings
 from app.core.llm import get_llm
+from quebrapdf import quebrar_pdf_por_capitulos
 
 _vectorstores_cache = {}
 
@@ -115,6 +116,8 @@ def atualizar_base_de_conhecimento():
     if not os.path.exists(settings.pdf_path):
         os.makedirs(settings.pdf_path)
         return
+    logger.info("🔪 Verificando se há arquivos gigantes para fatiar antes da indexação...")
+    quebrar_pdf_por_capitulos(settings.pdf_path)
 
     emb_model = get_embeddings()
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=settings.CHUNK_SIZE, chunk_overlap=settings.CHUNK_OVERLAP)
@@ -278,6 +281,89 @@ def processar_area_especifica(area: str, caminhos_arquivos: List[str]):
         except Exception as index_err:
             logger.error(f"❌ Erro crítico ao salvar índice FAISS na área específica: {index_err}")
             raise index_err
+# ==============================================================================
+# 3.2. GERENCIADOR DE PERSONAS (PROMPTS DINÂMICOS)
+# ==============================================================================
+
+def _obter_prompt_persona(area: str) -> str:
+    """Retorna o prompt do sistema (persona) adequado para a área solicitada."""
+    area_normalizada = area.lower().strip()
+    
+    # 1. PERSONA: DIREITO
+    if "direito" in area_normalizada:
+        return """Você é um Professor e Auditor Jurídico da UCDB, rigoroso e literal.
+Sua ÚNICA fonte de conhecimento são as leis, doutrinas e jurisprudências contidas nas tags <documentos>.
+
+<documentos>
+{context}
+</documentos>
+
+REGRAS DE RESPOSTA (DIREITO):
+1. Baseie-se EXCLUSIVAMENTE nas leis, jurisprudências e doutrinas contidas nas tags acima.
+2. Se o texto fornecer uma explicação doutrinária ou didática, use-a para formular uma resposta clara.
+3. Sempre cite o artigo de lei ou o nome do documento/autor em sua resposta.
+4. Se o contexto não trouxer informações suficientes, responda EXATAMENTE: "Não encontrei base legal ou doutrinária nos documentos disponibilizados."
+5. NUNCA utilize conhecimento prévio ou invente informações jurídicas fora das tags."""
+
+    # 2. PERSONA: ENGENHARIA E ARQUITETURA
+    elif "engenharia" in area_normalizada or "arquitetura" in area_normalizada:
+        return """Você é um Professor de Engenharia da UCDB, pragmático, matemático e focado em normas.
+Sua base de conhecimento são as normas técnicas, manuais e cálculos contidos nas tags <documentos>.
+
+<documentos>
+{context}
+</documentos>
+
+REGRAS DE RESPOSTA (ENGENHARIA):
+1. Forneça respostas diretas, estruturadas em passos lógicos ou tópicos.
+2. Baseie-se APENAS nos manuais, cálculos e normas (ex: ABNT) das tags.
+3. Se a pergunta envolver parâmetros de segurança ou fórmulas que não estão explícitas no documento, recuse a resposta informando: "Dados técnicos insuficientes nos documentos. Consulte a norma original."
+4. NUNCA invente medidas, fatores de segurança ou cálculos."""
+
+    # 3. PERSONA: TECNOLOGIA E COMPUTAÇÃO
+    elif "tecnologia" in area_normalizada or "computacao" in area_normalizada or "sistemas" in area_normalizada:
+        return """Você é um Especialista em Tecnologia e Computação da UCDB.
+Utilize estritamente a documentação de software, arquitetura e trechos de código presentes nas tags <documentos>.
+
+<documentos>
+{context}
+</documentos>
+
+REGRAS DE RESPOSTA (TECNOLOGIA):
+1. Baseie sua resposta na arquitetura e documentação fornecida nas tags.
+2. Se o usuário pedir para resolver um erro, forneça a solução documentada passo a passo.
+3. Se a tecnologia ou biblioteca mencionada não constar no contexto, avise: "Esta tecnologia não faz parte da documentação indexada atualmente."
+4. Mantenha um tom lógico, focado na resolução do problema e em boas práticas de código."""
+
+    # 4. PERSONA: SAÚDE (Enfermagem, Fisio, Vet, etc)
+    elif "saude" in area_normalizada or "medicina" in area_normalizada or "enfermagem" in area_normalizada or "veterinaria" in area_normalizada:
+        return """Você é um Professor da Área de Saúde da UCDB, extremamente cauteloso e científico.
+Sua base de conhecimento são estritamente os protocolos clínicos e artigos das tags <documentos>.
+
+<documentos>
+{context}
+</documentos>
+
+REGRAS DE RESPOSTA (SAÚDE):
+1. Baseie-se APENAS nas diretrizes documentadas fornecidas.
+2. Você está PROIBIDO de prescrever tratamentos diagnósticos ou dar conselhos médicos diretos ao usuário como se fosse uma consulta.
+3. Trate a resposta de forma acadêmica e científica.
+4. Se a resposta não for encontrada, diga: "Não há diretriz clínica ou protocolo nos documentos fornecidos para esta condição." """
+
+    # 5. PERSONA: GERAL (Fallback para outras áreas)
+    else:
+        return """Você é o Assistente Especialista da UCDB.
+Sua ÚNICA fonte de verdade são os textos contidos entre as tags <documentos>.
+
+<documentos>
+{context}
+</documentos>
+
+REGRAS DE RESPOSTA:
+1. Responda à pergunta baseando-se EXCLUSIVAMENTE nas informações contidas nas tags.
+2. Seja claro, direto e educado.
+3. Se a informação não estiver clara ou não existir no texto, responda: "Não encontrei essa informação nos documentos disponibilizados."
+4. NUNCA invente dados ou utilize conhecimento externo."""
 
 # ==============================================================================
 # 4. CHAT RAG
@@ -299,32 +385,17 @@ def get_rag_chain(area: str = "Geral"):
         _vectorstores_cache[caminho_indice] = FAISS.load_local(caminho_indice, emb_model, allow_dangerous_deserialization=True)
 
     vectorstore = _vectorstores_cache[caminho_indice]
-    # Usa a variável K do config.py
     retriever = vectorstore.as_retriever(search_kwargs={"k": settings.RETRIEVAL_K})
     
-    # 1. Adicionamos "STOP WORDS" para matar a alucinação de chat
     llm = get_llm().bind(stop=["Human:", "User:", "Question:", "System:", "<|im_end|>", "<|eot_id|>"])
 
-    # 2. Prompt unificado e mais limpo
-    system_msg = """Você é um auditor jurídico da UCDB estritamente literal.
-Sua ÚNICA fonte de verdade é o texto contido entre as tags <documentos>.
-
-<documentos>
-{context}
-</documentos>
-
-REGRAS DE EXTRAÇÃO (SIGA NA ORDEM):
-1. ANÁLISE: Procure nas tags <documentos> se existe algum Artigo, Parágrafo ou Inciso que responda DIRETAMENTE à pergunta do usuário.
-2. PROIBIÇÃO DE DEDUÇÃO: Você NÃO PODE juntar pedaços de textos diferentes, notas de rodapé ou jurisprudências para "montar" uma resposta. 
-3. RESPOSTA DIRETA: Se a informação existir claramente, responda.
-4. TRAVA DE SEGURANÇA: Se o texto da lei não explicar a resposta de forma clara e direta (por exemplo, se não houver um artigo dizendo explicitamente "a diferença é..."), você é OBRIGADO a parar e responder EXATAMENTE: "Não encontrei essa informação de forma direta e clara nos textos legais disponibilizados."
-5. NUNCA explique conceitos jurídicos usando suas próprias palavras.
-"""
+    # === AQUI ESTÁ A MÁGICA DA PERSONA ===
+    system_msg = _obter_prompt_persona(area)
     
     prompt = ChatPromptTemplate.from_messages([
         ("system", system_msg),
         MessagesPlaceholder(variable_name="chat_history"),
-        ("user", "{question}") # Usando "user" em vez de "human"
+        ("user", "{question}")
     ])
     
     chain = (

@@ -8,6 +8,7 @@ import logging
 from fastapi import UploadFile, File, Form
 import shutil
 from pathlib import Path
+from quebrapdf import quebrar_arquivo_unico
 
 # Imports do Projeto
 from app.api import schemas, models
@@ -198,6 +199,7 @@ async def ingest_files(current_user: models.User = Depends(get_current_user), db
     except Exception as e:
         logger.error(f"Erro na ingestão: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+    
 @router.post("/admin/upload")
 async def upload_files_to_area(
     area: str = Form(...),
@@ -206,36 +208,44 @@ async def upload_files_to_area(
     db: Session = Depends(get_db)
 ):
     """
-    Recebe 1 ou mais arquivos e processa apenas para a área de conhecimento especificada.
+    Recebe arquivos, fatia automaticamente se tiverem sumário, e processa para a área específica.
     """
     # 1. Permissões
     if current_user.role not in ["administrador", "professor", "coordenador"]:
         raise HTTPException(status_code=403, detail="Sem permissão para upload.")
 
-    # 2. Sanitiza o nome da área (Ex: "Direito Penal" -> "direito_penal")
+    # 2. Sanitiza o nome da área
     area_clean = area.lower().strip().replace(" ", "_")
-    
-    # 3. Prepara o diretório físico para salvar os PDFs brutos
     base_dir = Path(settings.pdf_path) / area_clean
     base_dir.mkdir(parents=True, exist_ok=True)
     
-    saved_files = []
+    arquivos_finais_para_vetorizar = []
     
-    # 4. Salva os arquivos no disco
+    # 3. Salva os arquivos e tenta fatiar
     for file in files:
         file_path = base_dir / file.filename
+        
+        # Salva o arquivo bruto no disco
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
-        saved_files.append(str(file_path))
+            
+        # === A MÁGICA ACONTECE AQUI ===
+        # Passa o arquivo salvo pelo nosso fatiador inteligente
+        partes_geradas = quebrar_arquivo_unico(str(file_path))
         
-    log_activity(db, current_user, "FILE_UPLOAD", "INFO", f"Enviou {len(files)} arquivos para a área {area}")
+        # Adiciona o resultado (seja 1 arquivo original ou 30 partes) à lista final
+        arquivos_finais_para_vetorizar.extend(partes_geradas)
+        
+    log_activity(db, current_user, "FILE_UPLOAD", "INFO", f"Enviou {len(files)} arquivos e gerou {len(arquivos_finais_para_vetorizar)} partes na área {area}")
     
-    # 5. Chama o pipeline de vetorização específico
-    from app.core.rag import processar_area_especifica # Nova função que você deverá criar no seu RAG
+    # 4. Chama o pipeline de vetorização específico com as partes menores
+    from app.core.rag import processar_area_especifica 
     try:
-        # Passamos a área e os caminhos dos novos arquivos para o VectorStore
-        processar_area_especifica(area_clean, saved_files)
-        return {"status": "success", "message": f"{len(files)} arquivos vetorizados na base de {area.capitalize()}."}
+        processar_area_especifica(area_clean, arquivos_finais_para_vetorizar)
+        return {
+            "status": "success", 
+            "message": f"{len(files)} arquivo(s) recebido(s), dividido(s) em {len(arquivos_finais_para_vetorizar)} parte(s) e vetorizado(s) em {area.capitalize()}."
+        }
     except Exception as e:
         logger.error(f"Erro na vetorização: {e}")
         raise HTTPException(status_code=500, detail=str(e))

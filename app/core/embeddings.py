@@ -11,59 +11,57 @@ class LlamaEmbeddings(Embeddings):
 
     def _get_single_embedding(self, text: str) -> List[float]:
         try:
-            # Timeout generoso para evitar falhas em textos longos
+            # 1. BLINDAGEM DE CONTEXTO: Força um limite absoluto de caracteres.
+            # Se um PDF tiver lixo sem espaços, cortamos na marra para não dar Erro 500 no Nomic.
+            texto_seguro = text[:5000] 
+            
             response = requests.post(
                 self.api_url,
-                json={"content": text},
+                json={"content": texto_seguro},
                 timeout=120
             )
             response.raise_for_status()
             data = response.json()
             
             vector = []
-            # 1. Tenta extrair do formato padrão
             if "embedding" in data:
                 vector = data["embedding"]
             elif isinstance(data, list) and "embedding" in data[0]:
                 vector = data[0]["embedding"]
             
-            # 2. Validação e Correção de Formato (O PULO DO GATO)
             if not vector:
                 raise ValueError("API retornou vetor vazio")
 
-            # Se o servidor devolveu [[0.1, 0.2...]], pegamos apenas a lista interna
             if isinstance(vector, list) and len(vector) > 0 and isinstance(vector[0], list):
                 vector = vector[0]
 
             return vector
         except Exception as e:
             logger.warning(f"⚠️ Erro ao vetorizar trecho: {e}")
-            # Retorna lista vazia para ser filtrada depois, evitando crash da thread
             return []
 
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
-        # Usa ThreadPool para velocidade
         embeddings = []
-        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        
+        # 2. DIMINUIMOS A PRESSÃO: 3 workers dão respiro para o Llama.cpp e a GPU
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
             results = list(executor.map(self._get_single_embedding, texts))
             
-            # Filtra falhas (vetores vazios) para não quebrar o FAISS
-            # Se um falhar, o documento correspondente ficará sem vetor (melhor que crashar tudo)
+            # 3. BLINDAGEM DO FAISS: O tamanho de texts DEVE ser igual ao de embeddings.
             for res in results:
                 if res:
                     embeddings.append(res)
                 else:
-                    # Fallback de emergência: vetor de zeros (não recomendado, mas evita crash)
-                    # O ideal é que o text_splitter já tenha limpado chunks ruins
-                    pass
+                    # O Nomic usa 768 dimensões. Se falhar, injetamos um vetor "neutro" cheio de zeros.
+                    # Isso impede que o FAISS crashe e apenas ignora aquele trecho corrompido na busca.
+                    embeddings.append([0.0] * 768)
                     
         return embeddings
 
     def embed_query(self, text: str) -> List[float]:
         vec = self._get_single_embedding(text)
         if not vec:
-            # Se falhar na query do usuário, retorna erro ou vetor zerado
-            return [0.0] * 1024 # Ajuste o tamanho conforme seu modelo se necessário
+            return [0.0] * 768 
         return vec
 
 def get_embeddings():

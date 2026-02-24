@@ -21,9 +21,9 @@ class Settings(BaseSettings):
     REPETITION_PENALTY: float = 1.05 # Llama 3.1 repete menos, penalidade leve
 
     # RAG
-    CHUNK_SIZE: int = 150      # Aumenta o tamanho do texto lido por vez
-    CHUNK_OVERLAP: int = 150    # Aumenta a sobreposição para não cortar ideias no meio
-    RETRIEVAL_K: int = 15      
+    CHUNK_SIZE: int = 1200      # Tamanho ideal. Cabe um Artigo inteiro com uns 10 incisos.
+    CHUNK_OVERLAP: int = 300    # Excelente "cola". 300 caracteres garantem que a palavra não corte no meio.
+    RETRIEVAL_K: int = 8        # Puxa os 8 melhores pedaços. 
 
     # CAMINHOS
     BASE_DIR: str = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
