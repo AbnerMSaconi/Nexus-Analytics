@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Lock, ShieldCheck, Server, UserPlus, LogIn, User as UserIcon } from 'lucide-react';
+import { Lock, ShieldCheck, Server, UserPlus, LogIn, User as UserIcon, BookOpen } from 'lucide-react';
 import type { User } from '../types';
 
 interface LoginProps {
@@ -15,6 +15,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [course, setCourse] = useState(''); // <--- NOVO ESTADO PARA O CURSO
   
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -31,11 +32,13 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
 
     const userData = await userResponse.json();
     
-    // Finaliza o processo no App.tsx
+    // Finaliza o processo no App.tsx passando o curso!
     onLogin(token, {
       id: userData.id,
-      username: userData.username || userData.full_name, // Fallback
-      role: userData.role
+      username: userData.username || userData.full_name, 
+      full_name: userData.full_name,
+      role: userData.role,
+      course: userData.course // <--- AGORA O CURSO É PASSADO PARA O FRONTEND
     });
   };
 
@@ -55,10 +58,11 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            external_id: username, // Usando username como ID único
+            external_id: username, 
             full_name: fullName,
             password: password,
-            role: 'user' // Padrão para novos usuários
+            course: course, // <--- ENVIANDO O CURSO PARA A API
+            role: 'aluno'   // <--- PADRÃO ALTERADO PARA ALUNO (Melhor para o seu RBAC)
           })
         });
 
@@ -67,9 +71,21 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
           throw new Error(errData.detail || 'Erro ao criar conta. Tente outro usuário.');
         }
 
-        // Se registrou com sucesso, o backend já retorna o token!
+        // Se registrou com sucesso, obtemos o token
         const data = await signupResponse.json();
-        await fetchUserAndLogin(data.access_token);
+        
+        // No signup o backend já devolve o token e o course, mas usamos a fetchUserAndLogin para padronizar
+        try {
+            await fetchUserAndLogin(data.access_token);
+        } catch (fetchErr) {
+            // Se o /me falhar, loga com os dados do signup
+            onLogin(data.access_token, {
+                id: username,
+                username: fullName,
+                role: 'aluno',
+                course: course
+            });
+        }
 
       } else {
         // --- LÓGICA DE LOGIN ---
@@ -87,6 +103,8 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
         }
 
         const data = await loginResponse.json();
+        
+        // Aqui buscamos o curso no /me e passamos pro frontend
         await fetchUserAndLogin(data.access_token);
       }
 
@@ -109,9 +127,9 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
           <div className="w-16 h-16 bg-slate-800 rounded-full flex items-center justify-center mb-4 border border-slate-600 shadow-lg">
             <Server className="w-8 h-8 text-blue-400" />
           </div>
-          <h1 className="text-2xl font-bold text-white tracking-tight">Nexus RAG System</h1>
+          <h1 className="text-2xl font-bold text-white tracking-tight">UCDB IA System</h1>
           <p className="text-slate-400 text-sm mt-1">
-            {isRegistering ? 'Crie sua conta corporativa' : 'Acesso Seguro Corporativo'}
+            {isRegistering ? 'Crie sua conta de aluno' : 'Acesso Acadêmico'}
           </p>
         </div>
 
@@ -135,6 +153,24 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
             </div>
           )}
 
+          {/* Campo Curso (Apenas Registro) */}
+          {isRegistering && (
+            <div className="animate-in fade-in slide-in-from-top-4 duration-300">
+              <label className="block text-xs uppercase tracking-wider text-slate-500 font-semibold mb-2">Curso</label>
+              <div className="relative">
+                <input 
+                  type="text" 
+                  required
+                  value={course}
+                  onChange={(e) => setCourse(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-700 text-white rounded-lg py-3 pl-10 pr-4 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
+                  placeholder="Ex: Engenharia de Computação, Direito..."
+                />
+                <BookOpen className="absolute left-3 top-3.5 w-5 h-5 text-slate-600" />
+              </div>
+            </div>
+          )}
+
           {/* Campo Usuário */}
           <div>
             <label className="block text-xs uppercase tracking-wider text-slate-500 font-semibold mb-2">Usuário (ID)</label>
@@ -144,7 +180,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               className="w-full bg-slate-900 border border-slate-700 text-white rounded-lg py-3 px-4 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
-              placeholder="ex: usuario.admin"
+              placeholder="ex: ra123456"
             />
           </div>
 

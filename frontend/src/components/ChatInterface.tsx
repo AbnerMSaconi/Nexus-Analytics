@@ -155,7 +155,30 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ user }) => {
 
     try {
       const token = localStorage.getItem('nexus_token');
-      const aiResponse = await generateRAGResponse(userText, "Geral", token);
+      
+      // === NOVA LÓGICA DE ROTEAMENTO DE PERSONA ===
+      let areaSolicitada = "Geral"; // Fallback padrão
+      
+      if (user.course) {
+        const cursoNormalizado = user.course.toLowerCase();
+        
+        // Mapeia o curso do aluno para o banco de dados vetorial correspondente
+        if (cursoNormalizado.includes("engenharia") || cursoNormalizado.includes("arquitetura")) {
+          areaSolicitada = "engenharia";
+        } else if (cursoNormalizado.includes("direito")) {
+          areaSolicitada = "direito";
+        } else if (cursoNormalizado.includes("tecnologia") || cursoNormalizado.includes("computa") || cursoNormalizado.includes("sistemas")) {
+          areaSolicitada = "tecnologia";
+        } else if (cursoNormalizado.includes("saude") || cursoNormalizado.includes("medicina") || cursoNormalizado.includes("enfermagem") || cursoNormalizado.includes("veterinaria")) {
+          areaSolicitada = "saude";
+        } else {
+          areaSolicitada = user.course; 
+        }
+      }
+
+      // Agora sim, chamamos a API passando a área correta do aluno!
+      const aiResponse = await generateRAGResponse(userText, areaSolicitada, token);
+      // =============================================
 
       const botMsg: Message = {
         id: crypto.randomUUID(),

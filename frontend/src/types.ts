@@ -1,10 +1,13 @@
 // frontend/src/types.ts
 
 // --- Autenticação e Usuário ---
+// --- Autenticação e Usuário ---
 export interface User {
   id: string;
   username: string;
+  full_name?: string; // Opcional, mas útil para exibir na tela
   role: string;
+  course?: string;   
 }
 
 export interface AuthState {
