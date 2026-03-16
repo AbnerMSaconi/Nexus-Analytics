@@ -96,3 +96,4 @@ pdfs/
 node_modules/
 .aider.*
 ucdb_ia.db
+.aider*

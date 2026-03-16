@@ -83,3 +83,42 @@
 
 # 2026-02-12 09:13:43.558810
 +como iniciar uma aplicacao node.js?
+
+# 2026-03-15 20:19:44.154510
++y
+
+# 2026-03-15 20:19:52.066489
++d
+
+# 2026-03-15 20:20:10.498694
++temos alguns problemas de respostas incorretas, acha que devemos alterar alguma coisa quanto a ingestao de arquivos e o processamento de embeddings?  
+
+# 2026-03-15 20:23:19.009911
++/add app/core/embeddings.py
+
+# 2026-03-15 20:23:43.938074
++D
+
+# 2026-03-15 20:23:51.714094
++/add all
+
+# 2026-03-15 20:24:08.146586
++/add app/core
+
+# 2026-03-15 20:24:13.202565
++temos alguns problemas de respostas incorretas, acha que devemos alterar alguma coisa quanto a ingestao de arquivos e o processamento de embeddings?  
+
+# 2026-03-15 20:25:33.546385
++temos alguns problemas de respostas incorretas, acha que devemos alterar alguma coisa quanto a ingestao de arquivos e o processamento de embeddings?
+
+# 2026-03-15 20:25:53.914352
++/remove app/core 
+
+# 2026-03-15 20:26:07.401932
++D
+
+# 2026-03-15 20:26:30.650321
++/add app/core/embeddings.py
+
+# 2026-03-15 20:26:33.882136
++temos alguns problemas de respostas incorretas, acha que devemos alterar alguma coisa quanto a ingestao de arquivos e o processamento de embeddings?
