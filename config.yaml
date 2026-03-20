@@ -1,6 +1,0 @@
-model_list:
-  - model_name: claude-sonnet-4-6
-    litellm_params:
-      model: openai/qwen-local
-      api_base: http://localhost:8000/v1
-      api_key: sk-local
