@@ -112,9 +112,31 @@ def quebrar_arquivo_unico(caminho_completo: str) -> list:
         total_paginas = len(reader.pages)
         capitulos = extrair_capitulos(reader)
         
-        # Se não tem sumário digital ou tem apenas 1 capítulo, não quebra
+        # Se não tem sumário digital ou tem apenas 1 capítulo, usa particionamento por limite de páginas (fallback)
         if not capitulos or len(capitulos) < 2:
-            return [caminho_completo]
+            print(f"⚠️ Sem sumário digital válido em {arquivo_nome}. Usando fatiamento por páginas (fallback)...")
+            PAGINAS_POR_PARTE = 20
+            if total_paginas <= PAGINAS_POR_PARTE:
+                return [caminho_completo]
+            
+            nome_base = os.path.splitext(arquivo_nome)[0]
+            for i in range(0, total_paginas, PAGINAS_POR_PARTE):
+                pagina_inicio = i
+                pagina_fim = min(i + PAGINAS_POR_PARTE, total_paginas)
+                
+                writer = PdfWriter()
+                for num_pagina in range(pagina_inicio, pagina_fim):
+                    writer.add_page(reader.pages[num_pagina])
+                    
+                nome_saida = f"{nome_base}_parte_{i//PAGINAS_POR_PARTE + 1:03d}.pdf"
+                caminho_saida = os.path.join(raiz, nome_saida)
+                
+                with open(caminho_saida, "wb") as f_saida:
+                    writer.write(f_saida)
+                arquivos_gerados.append(caminho_saida)
+            
+            os.remove(caminho_completo)
+            return arquivos_gerados
             
         nome_base = os.path.splitext(arquivo_nome)[0]
         

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Bot, User as UserIcon, BookOpen, Clock, Plus, Cpu, AlertTriangle, Trash2, ExternalLink } from 'lucide-react';
+import { Send, Bot, User as UserIcon, BookOpen, Clock, Plus, Cpu, Trash2, ExternalLink } from 'lucide-react';
 import { marked } from 'marked';
+import DOMPurify from 'dompurify';
 import { generateRAGResponse } from "../services/apiService";
 import { StorageService } from '../services/storageService';
 import type { Message, ChatSession, User } from '../types';
@@ -99,7 +100,8 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ user }) => {
   const renderMarkdown = (content: string) => {
     try {
       const html = marked.parse(content, { async: false }) as string;
-      return { __html: html };
+      const cleanHtml = DOMPurify.sanitize(html);
+      return { __html: cleanHtml };
     } catch (e) {
       return { __html: content };
     }

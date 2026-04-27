@@ -278,21 +278,7 @@ async def delete_conversation(
     return {"status": "success"}
 
 @router.post("/chat")
-async def chat(request: Request, body: schemas.ChatRequest, db: Session = Depends(get_db)):
-    # 1. Validação Manual do Token
-    try:
-        auth_header = request.headers.get('Authorization')
-        if not auth_header: raise Exception("Token ausente")
-        token = auth_header.split(" ")[1]
-        payload = security.jwt.decode(token, settings.SECRET_KEY, algorithms=[security.ALGORITHM])
-        user_id = payload.get("sub")
-        current_user = db.query(models.User).filter(models.User.external_id == user_id).first()
-        
-        if not current_user or current_user.is_blocked:
-            raise Exception("Usuario bloqueado ou invalido")
-    except Exception:
-        return StreamingResponse(iter([f'data: {json.dumps({"type": "error", "content": "Não autorizado."})}\n\n']))
-
+async def chat(request: Request, body: schemas.ChatRequest, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
     # 2. RBAC: Restrição de Área por Curso (BLINDADO)
     role_usuario = (current_user.role or "").lower().strip()
     
@@ -311,11 +297,11 @@ async def chat(request: Request, body: schemas.ChatRequest, db: Session = Depend
             if "engenharia" in curso_usuario or "tecnologia" in curso_usuario:
                 areas_permitidas.extend(["engenharia", "engenharias", "tecnologia", "tecnologias"])
         
-        # 4. Verifica se o que ele pediu está dentro do que ele pode acessar
+        # 4. Verifica se o que ele pediu está dentro do que ele pode acessar (AGORA COM MATCH EXATO)
         acesso_concedido = False
         for permitida in areas_permitidas:
-            # Se a área solicitada for exatamente igual ou contiver a palavra (ex: "engenharias" contém "engenharia")
-            if permitida == area_solicitada or permitida in area_solicitada:
+            # Match exato da área solicitada com a permitida para evitar bypass (ex: "geral_secreta" contendo "geral")
+            if permitida == area_solicitada:
                 acesso_concedido = True
                 break
                 

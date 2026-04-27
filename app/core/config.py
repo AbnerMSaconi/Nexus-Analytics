@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     APP_NAME: str = "UCDB Chat"
     API_V1_STR: str = "/api/v1"
     DEBUG: bool = False
-    SECRET_KEY: str = secrets.token_hex(32)
+    SECRET_KEY: str = os.getenv("SECRET_KEY", "chave_super_secreta_padrao_para_desenvolvimento_troque_em_prod")
 
     # SERVIÇOS
     LLM_BASE_URL: AnyHttpUrl = "http://localhost:8080/v1"

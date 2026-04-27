@@ -376,9 +376,9 @@ def get_rag_chain(area: str = "Geral"):
     caminho_indice = os.path.join(settings.vectorstore_path, f"index_{area_key}")
     
     if not os.path.exists(caminho_indice):
-        possiveis = [d for d in os.listdir(settings.vectorstore_path) if d.startswith("index_")]
-        if possiveis: caminho_indice = os.path.join(settings.vectorstore_path, possiveis[0])
-        else: return None
+        # Evita responder perguntas usando índices errados
+        logger.error(f"Índice não encontrado para a área: {area_key}")
+        return None
 
     if caminho_indice not in _vectorstores_cache:
         emb_model = get_embeddings()

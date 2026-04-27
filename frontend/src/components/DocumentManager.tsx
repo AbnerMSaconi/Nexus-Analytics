@@ -1,6 +1,6 @@
 // frontend/src/components/DocumentManager.tsx
 import React, { useState, useEffect, useRef } from 'react';
-import { Folder, FileText, Upload, Search, Database, RefreshCw, AlertCircle, ChevronRight, X, FileUp, Plus } from 'lucide-react'; 
+import { Folder, FileText, Upload, Search, Database, RefreshCw, AlertCircle, ChevronRight, X, FileUp } from 'lucide-react'; 
 import { StorageService } from '../services/storageService';
 import type { Folder as FolderType } from '../types';
 import { api } from '../assets/api';

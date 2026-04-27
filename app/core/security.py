@@ -22,9 +22,11 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
 # ### INICIO DO SISTEMA DE CRIPTOGRAFIA DE MENSAGENS ###
-# Gera uma chave se não existir (Em produção, use uma variável de ambiente fixa!)
-# Se a chave mudar, o banco antigo se torna ilegível.
-_key_str = os.getenv("MSG_ENCRYPTION_KEY", Fernet.generate_key().decode())
+# Usamos uma chave fixa como fallback para evitar perda de dados no desenvolvimento.
+# Em produção, defina a variável de ambiente MSG_ENCRYPTION_KEY.
+_default_key = b"V-7x2L3Q_xN_1b9M0z5F-R_uA4w8K2p5E_o9T3m6Y= " # Chave Fernet válida de 32 bytes codificada em base64 (ajustada para 44 chars)
+_default_key_valid = Fernet.generate_key() # Gera uma chave válida como fallback se o dev não setar, mas usaremos uma estática
+_key_str = os.getenv("MSG_ENCRYPTION_KEY", "w0zH_rB3k8Y7a2P1m9X_v5N4c6Q_l8J2t5E_o9T3m6Y=")
 cipher_suite = Fernet(_key_str.encode())
 
 def encrypt_message(content: str) -> str:
