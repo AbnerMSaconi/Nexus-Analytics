@@ -1,7 +1,7 @@
 import { api } from '../assets/api';
 
 // URL base do backend (ajuste se estiver rodando em outro IP)
-const BACKEND_URL = "http://localhost:8000";
+const BACKEND_URL = "http://127.0.0.1:8000";
 
 export interface RAGResponse {
   text: string;

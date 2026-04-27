@@ -1,28 +1,26 @@
 import React, { useState } from 'react';
-import { Lock, ShieldCheck, Server, UserPlus, LogIn, User as UserIcon, BookOpen } from 'lucide-react';
+import { Lock, ShieldCheck, UserPlus, LogIn, User as UserIcon, BookOpen } from 'lucide-react';
 import type { User } from '../types';
+import logoUcdb from '../assets/ucdb-ia-removebg-preview.png';
 
 interface LoginProps {
   onLogin: (token: string, user: User) => void;
 }
 
 export const Login: React.FC<LoginProps> = ({ onLogin }) => {
-  // Estado para alternar entre Login e Registro
+  // Mantendo todos os estados originais
   const [isRegistering, setIsRegistering] = useState(false);
-  
-  // Campos do formulário
   const [fullName, setFullName] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [course, setCourse] = useState(''); // <--- NOVO ESTADO PARA O CURSO
-  
+  const [course, setCourse] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const API_URL = 'http://localhost:8000';
+  const API_URL = 'http://127.0.0.1:8000';
 
-  // Função auxiliar para buscar dados do usuário e finalizar
+  // Lógica de busca de usuário mantida
   const fetchUserAndLogin = async (token: string) => {
     const userResponse = await fetch(`${API_URL}/me`, {
       headers: { 'Authorization': `Bearer ${token}` }
@@ -32,16 +30,16 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
 
     const userData = await userResponse.json();
     
-    // Finaliza o processo no App.tsx passando o curso!
     onLogin(token, {
       id: userData.id,
       username: userData.username || userData.full_name, 
       full_name: userData.full_name,
       role: userData.role,
-      course: userData.course // <--- AGORA O CURSO É PASSADO PARA O FRONTEND
+      course: userData.course 
     });
   };
 
+  // Lógica de submit mantida integralmente
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -49,7 +47,6 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
 
     try {
       if (isRegistering) {
-        // --- LÓGICA DE REGISTRO ---
         if (password !== confirmPassword) {
           throw new Error('As senhas não coincidem.');
         }
@@ -61,24 +58,23 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
             external_id: username, 
             full_name: fullName,
             password: password,
-            course: course, // <--- ENVIANDO O CURSO PARA A API
-            role: 'aluno'   // <--- PADRÃO ALTERADO PARA ALUNO (Melhor para o seu RBAC)
+            course: course,
+            role: 'aluno'
           })
         });
 
         if (!signupResponse.ok) {
           const errData = await signupResponse.json();
-          throw new Error(errData.detail || 'Erro ao criar conta. Tente outro usuário.');
+          const errorMsg = typeof errData.detail === 'string' 
+            ? errData.detail 
+            : (Array.isArray(errData.detail) ? JSON.stringify(errData.detail[0].msg) : 'Erro ao criar conta.');
+          throw new Error(errorMsg);
         }
 
-        // Se registrou com sucesso, obtemos o token
         const data = await signupResponse.json();
-        
-        // No signup o backend já devolve o token e o course, mas usamos a fetchUserAndLogin para padronizar
         try {
             await fetchUserAndLogin(data.access_token);
         } catch (fetchErr) {
-            // Se o /me falhar, loga com os dados do signup
             onLogin(data.access_token, {
                 id: username,
                 username: fullName,
@@ -88,7 +84,6 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
         }
 
       } else {
-        // --- LÓGICA DE LOGIN ---
         const loginResponse = await fetch(`${API_URL}/login`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -103,8 +98,6 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
         }
 
         const data = await loginResponse.json();
-        
-        // Aqui buscamos o curso no /me e passamos pro frontend
         await fetchUserAndLogin(data.access_token);
       }
 
@@ -117,109 +110,106 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
-      <div className="w-full max-w-md bg-slate-800 border border-slate-700 rounded-xl shadow-2xl p-8 relative overflow-hidden transition-all duration-500">
+    <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
+      <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-xl shadow-2xl p-8 relative overflow-hidden transition-all duration-500">
         
-        {/* Fundo decorativo */}
-        <div className={`absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-600 via-blue-400 to-blue-600 transition-all duration-1000 ${loading ? 'animate-pulse' : ''}`}></div>
+        {/* Faixa decorativa com as cores da UCDB (Azul e Grená) */}
+        <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-[#003366] via-[#990000] to-[#003366]"></div>
 
-        <div className="flex flex-col items-center mb-6">
-          <div className="w-16 h-16 bg-slate-800 rounded-full flex items-center justify-center mb-4 border border-slate-600 shadow-lg">
-            <Server className="w-8 h-8 text-blue-400" />
+        <div className="flex flex-col items-center mb-8">
+          {/* Logo Centralizado */}
+          <div className="mb-4 drop-shadow-lg">
+            <img src={logoUcdb} alt="UCDB IA Logo" className="h-24 w-auto object-contain" />
           </div>
-          <h1 className="text-2xl font-bold text-white tracking-tight">UCDB IA System</h1>
-          <p className="text-slate-400 text-sm mt-1">
-            {isRegistering ? 'Crie sua conta de aluno' : 'Acesso Acadêmico'}
+          <h1 className="text-3xl font-bold text-white tracking-tight">UCDB-IA</h1>
+          <p className="text-slate-400 text-sm mt-1 uppercase tracking-widest font-medium">
+            {isRegistering ? 'Cadastro de Aluno' : 'Acesso Acadêmico'}
           </p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-5">
           
-          {/* Campo Nome Completo (Apenas Registro) */}
           {isRegistering && (
-            <div className="animate-in fade-in slide-in-from-top-4 duration-300">
-              <label className="block text-xs uppercase tracking-wider text-slate-500 font-semibold mb-2">Nome Completo</label>
-              <div className="relative">
-                <input 
-                  type="text" 
-                  required
-                  value={fullName}
-                  onChange={(e) => setFullName(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-700 text-white rounded-lg py-3 pl-10 pr-4 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
-                  placeholder="Seu Nome"
-                />
-                <UserIcon className="absolute left-3 top-3.5 w-5 h-5 text-slate-600" />
+            <div className="space-y-4 animate-in fade-in slide-in-from-top-4 duration-300">
+              {/* Nome Completo */}
+              <div>
+                <label className="block text-xs uppercase tracking-wider text-slate-500 font-bold mb-2 ml-1">Nome Completo</label>
+                <div className="relative">
+                  <input 
+                    type="text" 
+                    required
+                    value={fullName}
+                    onChange={(e) => setFullName(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 text-white rounded-lg py-3 pl-10 pr-4 focus:outline-none focus:border-[#003366] focus:ring-1 focus:ring-[#003366] transition-all"
+                    placeholder="Nome completo"
+                  />
+                  <UserIcon className="absolute left-3 top-3.5 w-5 h-5 text-slate-600" />
+                </div>
+              </div>
+
+              {/* Curso */}
+              <div>
+                <label className="block text-xs uppercase tracking-wider text-slate-500 font-bold mb-2 ml-1">Curso</label>
+                <div className="relative">
+                  <input 
+                    type="text" 
+                    required
+                    value={course}
+                    onChange={(e) => setCourse(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 text-white rounded-lg py-3 pl-10 pr-4 focus:outline-none focus:border-[#003366] focus:ring-1 focus:ring-[#003366] transition-all"
+                    placeholder="Engenharia de Computação..."
+                  />
+                  <BookOpen className="absolute left-3 top-3.5 w-5 h-5 text-slate-600" />
+                </div>
               </div>
             </div>
           )}
 
-          {/* Campo Curso (Apenas Registro) */}
-          {isRegistering && (
-            <div className="animate-in fade-in slide-in-from-top-4 duration-300">
-              <label className="block text-xs uppercase tracking-wider text-slate-500 font-semibold mb-2">Curso</label>
-              <div className="relative">
-                <input 
-                  type="text" 
-                  required
-                  value={course}
-                  onChange={(e) => setCourse(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-700 text-white rounded-lg py-3 pl-10 pr-4 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
-                  placeholder="Ex: Engenharia de Computação, Direito..."
-                />
-                <BookOpen className="absolute left-3 top-3.5 w-5 h-5 text-slate-600" />
-              </div>
-            </div>
-          )}
-
-          {/* Campo Usuário */}
+          {/* Usuário */}
           <div>
-            <label className="block text-xs uppercase tracking-wider text-slate-500 font-semibold mb-2">Usuário (ID)</label>
+            <label className="block text-xs uppercase tracking-wider text-slate-500 font-bold mb-2 ml-1">Usuário (ID/RA)</label>
             <input 
               type="text" 
               required
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              className="w-full bg-slate-900 border border-slate-700 text-white rounded-lg py-3 px-4 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
+              className="w-full bg-slate-950 border border-slate-800 text-white rounded-lg py-3 px-4 focus:outline-none focus:border-[#003366] focus:ring-1 focus:ring-[#003366] transition-all"
               placeholder="ex: ra123456"
             />
           </div>
 
-          {/* Campo Senha */}
+          {/* Senha */}
           <div>
-            <label className="block text-xs uppercase tracking-wider text-slate-500 font-semibold mb-2">Senha</label>
+            <label className="block text-xs uppercase tracking-wider text-slate-500 font-bold mb-2 ml-1">Senha</label>
             <div className="relative">
               <input 
                 type="password" 
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-700 text-white rounded-lg py-3 px-4 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
+                className="w-full bg-slate-950 border border-slate-800 text-white rounded-lg py-3 px-4 focus:outline-none focus:border-[#003366] focus:ring-1 focus:ring-[#003366] transition-all"
                 placeholder="••••••••"
               />
               <Lock className="absolute right-3 top-3.5 w-5 h-5 text-slate-600" />
             </div>
           </div>
 
-          {/* Campo Confirmar Senha (Apenas Registro) */}
           {isRegistering && (
             <div className="animate-in fade-in slide-in-from-top-4 duration-300">
-              <label className="block text-xs uppercase tracking-wider text-slate-500 font-semibold mb-2">Confirmar Senha</label>
-              <div className="relative">
-                <input 
-                  type="password" 
-                  required
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-700 text-white rounded-lg py-3 px-4 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
-                  placeholder="••••••••"
-                />
-                <Lock className="absolute right-3 top-3.5 w-5 h-5 text-slate-600" />
-              </div>
+              <label className="block text-xs uppercase tracking-wider text-slate-500 font-bold mb-2 ml-1">Confirmar Senha</label>
+              <input 
+                type="password" 
+                required
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-800 text-white rounded-lg py-3 px-4 focus:outline-none focus:border-[#003366] focus:ring-1 focus:ring-[#003366] transition-all"
+                placeholder="••••••••"
+              />
             </div>
           )}
 
           {error && (
-            <div className="text-red-400 text-xs bg-red-900/20 p-3 rounded border border-red-900/50 flex items-center animate-pulse">
+            <div className="text-red-400 text-xs bg-red-900/20 p-3 rounded border border-red-900/50 flex items-center animate-in fade-in duration-300">
               <ShieldCheck className="w-4 h-4 mr-2 shrink-0" />
               {error}
             </div>
@@ -228,33 +218,32 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
           <button 
             type="submit" 
             disabled={loading}
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg transition-colors flex items-center justify-center shadow-lg shadow-blue-900/20 mt-2"
+            className="w-full bg-[#003366] hover:bg-[#004080] text-white font-bold py-4 rounded-lg transition-all flex items-center justify-center shadow-lg shadow-blue-900/10 mt-6 active:scale-[0.98]"
           >
             {loading ? (
               <span className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full"></span>
             ) : (
               isRegistering ? (
-                <><UserPlus className="w-5 h-5 mr-2" /> Criar Conta</>
+                <><UserPlus className="w-5 h-5 mr-2" /> CRIAR CONTA</>
               ) : (
-                <><LogIn className="w-5 h-5 mr-2" /> Entrar no Sistema</>
+                <><LogIn className="w-5 h-5 mr-2" /> ACESSAR SISTEMA</>
               )
             )}
           </button>
         </form>
 
-        {/* Botão de Alternância */}
-        <div className="mt-6 text-center pt-4 border-t border-slate-700/50">
-          <p className="text-slate-400 text-sm mb-2">
-            {isRegistering ? 'Já possui acesso?' : 'Não tem uma conta?'}
+        <div className="mt-8 text-center pt-6 border-t border-slate-800/50">
+          <p className="text-slate-500 text-sm mb-2">
+            {isRegistering ? 'Já possui acesso?' : 'Ainda não tem uma conta?'}
           </p>
           <button 
             onClick={() => {
               setIsRegistering(!isRegistering);
               setError('');
             }}
-            className="text-blue-400 hover:text-blue-300 text-sm font-medium hover:underline transition-colors"
+            className="text-blue-400 hover:text-blue-300 text-sm font-bold transition-colors underline-offset-4 hover:underline"
           >
-            {isRegistering ? 'Voltar para Login' : 'Criar nova conta'}
+            {isRegistering ? 'VOLTAR PARA LOGIN' : 'SOLICITAR NOVO ACESSO'}
           </button>
         </div>
       </div>

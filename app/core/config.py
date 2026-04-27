@@ -20,31 +20,30 @@ class Settings(BaseSettings):
     TOP_P: float = 0.90
     REPETITION_PENALTY: float = 1.05 # Llama 3.1 repete menos, penalidade leve
 
-    # RAG
-    CHUNK_SIZE: int = 1200      # Tamanho ideal. Cabe um Artigo inteiro com uns 10 incisos.
-    CHUNK_OVERLAP: int = 300    # Excelente "cola". 300 caracteres garantem que a palavra não corte no meio.
-    RETRIEVAL_K: int = 8        # Puxa os 8 melhores pedaços. 
+    # RAG - Otimizado para modelos locais (Qwen/Llama)
+    CHUNK_SIZE: int = 600      # Reduzido de 1200 para 600 para evitar erro de contexto
+    CHUNK_OVERLAP: int = 100    # Reduzido de 300 para 100
+    RETRIEVAL_K: int = 5        # Reduzido de 8 para 5 para economizar contexto no chat
 
     # CAMINHOS
     BASE_DIR: str = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     # Garanta que este caminho é onde você salvou o arquivo .gguf
     MODELS_DIR: str = os.path.expanduser("~/.cache/llama.cpp")
     
-    # MODELO DE EMBEDDING (Mantém o Qwen, é ótimo)
+    # MODELO DE EMBEDDING (Qwen 3B/4B)
     CMD_EMBEDDING: list = [
-        "llama-server", "-m", "Qwen_Qwen3-Embedding-0.6B-GGUF_Qwen3-Embedding-0.6B-Q8_0.gguf",
+        "llama-server", "-m", "qwen2.5-3b-instruct-q4_k_m.gguf",
         "--embedding", "--port", "8081"
     ]
 
-    # NOVO MODELO LLM (Hermes 3 - Llama 3.1)
-    # Substitua 'Hermes-3-Llama-3.1-8B.Q4_K_M.gguf' pelo nome exato do arquivo que você baixou
+    # MODELO LLM (Qwen 3B/4B Instruct)
     CMD_LLM: list = [
         "llama-server", 
-        "-m", "NousResearch_Hermes-3-Llama-3.1-8B-GGUF_Hermes-3-Llama-3.1-8B.Q4_K_M.gguf", 
+        "-m", "qwen2.5-3b-instruct-q4_k_m.gguf", 
         "--port", "8080", 
-        "-fa", "1",       # Flash Attention (essencial para Llama 3)
-        "-c", "16384",     # Contexto
-        "-ngl", "99"      # GPU Offload máximo
+        "-fa", "1",
+        "-c", "32768",
+        "-ngl", "99"
     ]
     
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=False, extra="ignore")

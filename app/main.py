@@ -47,19 +47,7 @@ def start_service(name, port, cmd):
 async def lifespan(app: FastAPI):
     setup_logging()
     logger.info("🌐 Iniciando UCDB-IA...")
-    
-    # Inicia serviços de IA se necessário
-    # start_service("Embeddings", 8081, settings.CMD_EMBEDDING)
-    # start_service("LLM (GLM-4)", 8080, settings.CMD_LLM)
-    
-    # Inicializa o RAG (opcional, pode ser pesado no boot)
-    # try: 
-    #     from app.api.routes import _initialize_rag
-    #     _initialize_rag()
-    # except: pass
-    
     yield
-    
     logger.info("🛑 Encerrando...")
     for p in _procs: p.terminate()
 
@@ -71,7 +59,8 @@ app.add_middleware(
     allow_origins=["*"], 
     allow_credentials=True, 
     allow_methods=["*"], 
-    allow_headers=["*"]
+    allow_headers=["*"],
+    expose_headers=["*"]
 )
 
 app.include_router(router)

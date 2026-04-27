@@ -319,7 +319,8 @@ async def chat(request: Request, body: schemas.ChatRequest, db: Session = Depend
 
     rag_chain = get_rag_chain(body.area)
     if not rag_chain: 
-        return StreamingResponse(iter(['data: {"type": "error", "content": "Índice indisponível."}\n\n']))
+        msg = f"A base de conhecimento '{body.area}' ainda não foi indexada. Por favor, adicione documentos e processe-os no painel administrativo."
+        return StreamingResponse(iter([f'data: {json.dumps({"type": "error", "content": msg})}\n\n']))
 
     # 3. Cria Conversa e Mensagem
     new_conv = models.Conversation(

@@ -10,7 +10,15 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.messages import AIMessage, HumanMessage
 
-from langchain_community.vectorstores import FAISS
+try:
+    from langchain_community.vectorstores import FAISS
+except ImportError:
+    print("\n" + "!"*60)
+    print("ERRO CRÍTICO: O pacote 'faiss' não foi encontrado.")
+    print("Por favor, execute: pip install faiss-cpu")
+    print("!"*60 + "\n")
+    raise
+
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
@@ -27,8 +35,15 @@ _vectorstores_cache = {}
 # 1. UTILITÁRIOS
 # ==============================================================================
 
+import unicodedata
+
 def _normalizar_nome_area(nome_pasta: str) -> str:
-    return nome_pasta.lower().strip().replace(" ", "_")
+    # Remove acentos e caracteres especiais
+    nfkd_form = unicodedata.normalize('NFKD', nome_pasta)
+    apenas_ascii = nfkd_form.encode('ASCII', 'ignore').decode('utf-8')
+    # Converte para minúsculo, remove espaços e caracteres não alfanuméricos
+    limpo = apenas_ascii.lower().strip().replace(" ", "_")
+    return re.sub(r'[^a-z0-9_]', '', limpo)
 
 def _carregar_manifesto(caminho_indice: str) -> dict:
     p = os.path.join(caminho_indice, "manifest.json")
@@ -189,6 +204,8 @@ def atualizar_base_de_conhecimento():
                     vs_atual.add_documents(docs_para_indexar) 
                     vs_atual.save_local(caminho_indice)
                 else:
+                    # Força a criação da pasta antes de salvar
+                    os.makedirs(caminho_indice, exist_ok=True)
                     vs_novo = FAISS.from_documents(docs_para_indexar, emb_model)
                     vs_novo.save_local(caminho_indice)
                 
@@ -260,6 +277,9 @@ def processar_area_especifica(area: str, caminhos_arquivos: List[str]):
     if docs_para_indexar:
         try:
             indice_faiss_path = os.path.join(caminho_indice, "index.faiss")
+            # Força a criação da pasta da área antes de tentar salvar
+            os.makedirs(caminho_indice, exist_ok=True)
+            
             if os.path.exists(indice_faiss_path):
                 # Anexa aos vetores existentes
                 vs_atual = FAISS.load_local(caminho_indice, emb_model, allow_dangerous_deserialization=True)

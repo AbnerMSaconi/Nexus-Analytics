@@ -2,18 +2,18 @@
 <html lang="pt-BR">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <link rel="icon" type="image/png" href="/favicon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     
     <meta http-equiv="Content-Security-Policy" content="
-      default-src 'self' http://localhost:8000; 
+      default-src 'self' http://localhost:8000 http://127.0.0.1:8000; 
       script-src 'self' 'unsafe-eval' 'unsafe-inline' https://cdn.jsdelivr.net; 
       style-src 'self' 'unsafe-inline'; 
       font-src 'self' https://cdn.jsdelivr.net; 
-      connect-src 'self' http://localhost:8000 ws://localhost:5173 https://cdn.jsdelivr.net;
+      connect-src 'self' http://localhost:8000 http://127.0.0.1:8000 ws://localhost:5173 https://cdn.jsdelivr.net;
     ">
     
-    <title>Nexus RAG</title>
+    <title>UCDB-IA</title>
 
     <script>
       window.MathJax = {

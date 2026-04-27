@@ -1,5 +1,5 @@
 // frontend/src/assets/api.ts
-const API_URL = "http://localhost:8000";
+const API_URL = "http://127.0.0.1:8000";
 
 export const api = {
   // Chat com streaming
@@ -44,7 +44,7 @@ export const api = {
   },
   
   async getUsers(token: string) {
-    const res = await fetch(`http://localhost:8000/admin/users`, {
+    const res = await fetch(`${API_URL}/admin/users`, {
       headers: { 'Authorization': `Bearer ${token}` }
     });
     if (!res.ok) throw new Error('Falha ao buscar usuários');
@@ -52,7 +52,7 @@ export const api = {
   },
 
     async unblockUser(userId: string, token: string) {
-      const res = await fetch(`http://localhost:8000/admin/unblock/${userId}`, {
+      const res = await fetch(`${API_URL}/admin/unblock/${userId}`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -60,7 +60,7 @@ export const api = {
       return res.json();
     },
     async updateUserRole(userId: string, newRole: string, token: string) {
-    const res = await fetch(`http://localhost:8000/admin/users/${userId}/role`, {
+    const res = await fetch(`${API_URL}/admin/users/${userId}/role`, {
       method: 'PUT',
       headers: { 
         'Authorization': `Bearer ${token}`,
@@ -76,7 +76,7 @@ export const api = {
     return res.json();
   },
   async deleteUser(userId: string, token: string) {
-    const res = await fetch(`http://localhost:8000/admin/users/${userId}`, {
+    const res = await fetch(`${API_URL}/admin/users/${userId}`, {
       method: 'DELETE',
       headers: { 
         'Authorization': `Bearer ${token}` 
@@ -90,7 +90,7 @@ export const api = {
     return res.json();
   },
   async updateUserDetails(userId: string, data: any, token: string) {
-    const res = await fetch(`http://localhost:8000/admin/users/${userId}`, {
+    const res = await fetch(`${API_URL}/admin/users/${userId}`, {
       method: 'PUT',
       headers: {
         'Authorization': `Bearer ${token}`,
