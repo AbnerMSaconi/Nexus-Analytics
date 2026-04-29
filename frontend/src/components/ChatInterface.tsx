@@ -50,25 +50,36 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ user }) => {
   const loadSessions = async () => {
     const loadedSessions = await StorageService.getSessions(user.id);
     setSessions(loadedSessions);
-    if (loadedSessions.length > 0 && !currentSessionId) {
-      setCurrentSessionId(loadedSessions[0].id);
-    } else if (loadedSessions.length === 0) {
+    
+    // Só cria se REALMENTE não houver nada e não estivermos no meio de um carregamento
+    if (loadedSessions.length > 0) {
+      if (!currentSessionId) setCurrentSessionId(loadedSessions[0].id);
+    } else {
       createNewSession();
     }
   };
 
   const createNewSession = async () => {
-    const newSession: ChatSession = {
-      id: crypto.randomUUID(),
-      userId: user.id,
-      title: 'Nova Conversa',
-      messages: [],
-      createdAt: new Date(),
-      updatedAt: new Date()
-    };
-    await StorageService.saveSession(newSession);
-    setSessions(prev => [newSession, ...prev]);
-    setCurrentSessionId(newSession.id);
+    // Evita duplicidade se já houver uma sessão vazia no topo
+    setSessions(prev => {
+      if (prev.length > 0 && prev[0].messages.length === 0) {
+        setCurrentSessionId(prev[0].id);
+        return prev;
+      }
+
+      const newSession: ChatSession = {
+        id: crypto.randomUUID(),
+        userId: user.id,
+        title: 'Nova Conversa',
+        messages: [],
+        createdAt: new Date(),
+        updatedAt: new Date()
+      };
+
+      StorageService.saveSession(newSession);
+      setCurrentSessionId(newSession.id);
+      return [newSession, ...prev];
+    });
   };
 
   const deleteSession = async (e: React.MouseEvent, sessionId: string) => {

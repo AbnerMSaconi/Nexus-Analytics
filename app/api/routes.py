@@ -15,9 +15,10 @@ from quebrapdf import quebrar_arquivo_unico
 from app.api import schemas, models
 from app.core import security
 from app.core.database import get_db, SessionLocal
-from app.core.rag import get_rag_chain, atualizar_base_de_conhecimento
+from app.core.rag import get_rag_chain_async, atualizar_base_de_conhecimento_async
 from app.core.config import settings
 from app.core.security import get_current_user, encrypt_message, decrypt_message
+from app.utils.performance import PerformanceMonitor
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -96,6 +97,7 @@ async def signup(user_in: schemas.UserCreate, db: Session = Depends(get_db)):
     return {
         "access_token": access_token, 
         "token_type": "bearer",
+        "id": new_user.id,
         "role": new_user.role,
         "course": new_user.course
     }
@@ -126,6 +128,7 @@ async def login(user_in: schemas.UserLogin, db: Session = Depends(get_db)):
     return {
         "access_token": access_token, 
         "token_type": "bearer",
+        "id": user.id,
         "role": user.role,
         "course": user.course
     }
@@ -133,7 +136,7 @@ async def login(user_in: schemas.UserLogin, db: Session = Depends(get_db)):
 @router.get("/me")
 async def read_users_me(current_user: models.User = Depends(get_current_user)):
     return {
-        "id": current_user.external_id,
+        "id": current_user.id,
         "username": current_user.external_id,
         "full_name": current_user.full_name,
         "role": current_user.role,
@@ -194,7 +197,7 @@ async def ingest_files(background_tasks: BackgroundTasks, current_user: models.U
     
     log_activity(db, current_user, "INGEST_START", "INFO", "Usuario iniciou ingestao.")
     
-    background_tasks.add_task(atualizar_base_de_conhecimento)
+    background_tasks.add_task(atualizar_base_de_conhecimento_async)
     return {"status": "processing", "message": "A ingestão global foi iniciada em segundo plano."}
     
 @router.websocket("/ws/{user_id}")
@@ -255,8 +258,8 @@ async def upload_files_to_area(
     log_activity(db, current_user, "FILE_UPLOAD", "INFO", f"Enviou {len(files)} arquivos e gerou {len(arquivos_finais_para_vetorizar)} partes na área {area}")
     
     # 4. Chama o pipeline de vetorização específico em background (agora com user_id para notificação)
-    from app.core.rag import processar_area_especifica 
-    background_tasks.add_task(processar_area_especifica, area_clean, arquivos_finais_para_vetorizar, str(current_user.id))
+    from app.core.rag import processar_area_especifica_async
+    background_tasks.add_task(processar_area_especifica_async, area_clean, arquivos_finais_para_vetorizar, str(current_user.id))
     
     return {
         "status": "processing", 
@@ -310,11 +313,14 @@ async def chat(request: Request, body: schemas.ChatRequest, db: Session = Depend
             if "engenharia" in curso_usuario or "tecnologia" in curso_usuario:
                 areas_permitidas.extend(["engenharia", "engenharias", "tecnologia", "tecnologias"])
         
-        # 4. Verifica se o que ele pediu está dentro do que ele pode acessar (AGORA COM MATCH EXATO)
+        # 4. Verifica se o que ele pediu está dentro do que ele pode acessar
         acesso_concedido = False
+        area_solicitada_clean = area_solicitada.lower().strip().replace(" ", "_")
+        
         for permitida in areas_permitidas:
-            # Match exato da área solicitada com a permitida para evitar bypass (ex: "geral_secreta" contendo "geral")
-            if permitida == area_solicitada:
+            permitida_clean = permitida.lower().strip().replace(" ", "_")
+            # Match exato ou match de categoria (ex: engenharia_civil contém engenharia)
+            if permitida_clean == area_solicitada_clean or permitida_clean in area_solicitada_clean:
                 acesso_concedido = True
                 break
                 
@@ -330,7 +336,9 @@ async def chat(request: Request, body: schemas.ChatRequest, db: Session = Depend
 
     log_activity(db, current_user, "CHAT_START", "INFO", f"Chat na area {body.area}")
 
-    rag_chain = get_rag_chain(body.area)
+    from app.core.rag import get_rag_chain_async
+    rag_chain = await get_rag_chain_async(body.area)
+    
     if not rag_chain: 
         msg = f"A base de conhecimento '{body.area}' ainda não foi indexada. Por favor, adicione documentos e processe-os no painel administrativo."
         return StreamingResponse(iter([f'data: {json.dumps({"type": "error", "content": msg})}\n\n']))
@@ -349,50 +357,51 @@ async def chat(request: Request, body: schemas.ChatRequest, db: Session = Depend
     db.commit()
 
     async def event_stream():
-        full_answer = ""
-        source_documents = []
-        try:
-            yield f"data: {json.dumps({'type': 'start'})}\n\n"
-            
-            async for chunk in rag_chain.astream({"question": body.message, "chat_history": []}):
-                if "answer" in chunk:
-                    token = chunk["answer"]
-                    full_answer += token
-                    yield f"data: {json.dumps({'type': 'chunk', 'content': token})}\n\n"
-                if "source_documents" in chunk:
-                    source_documents = chunk["source_documents"]
+        async with PerformanceMonitor.async_timer("Geração de Resposta Total (End-to-End)"):
+            full_answer = ""
+            source_documents = []
+            try:
+                yield f"data: {json.dumps({'type': 'start'})}\n\n"
+                
+                async for chunk in rag_chain.astream({"question": body.message, "chat_history": []}):
+                    if "answer" in chunk:
+                        token = chunk["answer"]
+                        full_answer += token
+                        yield f"data: {json.dumps({'type': 'chunk', 'content': token})}\n\n"
+                    if "source_documents" in chunk:
+                        source_documents = chunk["source_documents"]
 
-            if source_documents:
-                unique_sources = {}
-                for d in source_documents:
-                    full_path = d.metadata.get("source", "")
-                    filename = os.path.basename(full_path)
-                    try:
-                        relative_path = os.path.relpath(full_path, settings.pdf_path)
-                    except:
-                        relative_path = filename
+                if source_documents:
+                    unique_sources = {}
+                    for d in source_documents:
+                        full_path = d.metadata.get("source", "")
+                        filename = os.path.basename(full_path)
+                        try:
+                            relative_path = os.path.relpath(full_path, settings.pdf_path)
+                        except:
+                            relative_path = filename
 
-                    if filename not in unique_sources:
-                        unique_sources[filename] = {
-                            "filename": filename,
-                            "filepath": relative_path,
-                            "topic": d.metadata.get("topic", "Documento")
-                        }
-                yield f"data: {json.dumps({'type': 'sources', 'content': list(unique_sources.values())}, ensure_ascii=False)}\n\n"
+                        if filename not in unique_sources:
+                            unique_sources[filename] = {
+                                "filename": filename,
+                                "filepath": relative_path,
+                                "topic": d.metadata.get("topic", "Documento")
+                            }
+                    yield f"data: {json.dumps({'type': 'sources', 'content': list(unique_sources.values())}, ensure_ascii=False)}\n\n"
 
-            with SessionLocal() as db2:
-                encrypted_output = encrypt_message(full_answer)
-                db2.add(models.Message(conversation_id=new_conv.id, role="ai", content=encrypted_output))
-                db2.commit()
-            
-            yield f"data: {json.dumps({'type': 'complete'})}\n\n"
+                with SessionLocal() as db2:
+                    encrypted_output = encrypt_message(full_answer)
+                    db2.add(models.Message(conversation_id=new_conv.id, role="ai", content=encrypted_output))
+                    db2.commit()
+                
+                yield f"data: {json.dumps({'type': 'complete'})}\n\n"
 
-        except Exception as e:
-            logger.error(f"Erro no chat: {e}")
-            with SessionLocal() as db_err:
-                u = db_err.query(models.User).filter(models.User.id == current_user.id).first()
-                log_activity(db_err, u, "SYSTEM_ERROR", "ERROR", str(e))
-            yield f"data: {json.dumps({'type': 'error', 'content': 'Erro interno.'})}\n\n"
+            except Exception as e:
+                logger.error(f"Erro no chat: {e}")
+                with SessionLocal() as db_err:
+                    u = db_err.query(models.User).filter(models.User.id == current_user.id).first()
+                    log_activity(db_err, u, "SYSTEM_ERROR", "ERROR", str(e))
+                yield f"data: {json.dumps({'type': 'error', 'content': 'Erro interno.'})}\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 

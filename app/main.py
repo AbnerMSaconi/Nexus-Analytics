@@ -28,18 +28,16 @@ def start_service(name, port, cmd):
         logger.info(f"✅ {name} online na porta {port}.")
         return
     
-    logger.warning(f"⚠️ {name} offline. Tentando iniciar...")
+    logger.warning(f"⚠️ {name} offline. Tentando iniciar automaticamente...")
     try:
-        # Tenta input, se falhar (não interativo), avisa
-        try: res = input(f"Iniciar {name}? (s/n): ")
-        except: res = 'n'
-        
-        if res.lower() in ['s', 'y']:
-            # Ajuste para rodar em background sem travar
-            p = subprocess.Popen(cmd, cwd=settings.MODELS_DIR, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            _procs.append(p)
-            time.sleep(3)
-            if check_port(port): logger.success(f"🚀 {name} iniciado!")
+        # Ajuste para rodar em background sem travar e sem pedir input
+        p = subprocess.Popen(cmd, cwd=settings.MODELS_DIR, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        _procs.append(p)
+        time.sleep(5) # Espera um pouco mais para o modelo carregar (VRAM)
+        if check_port(port): 
+            logger.success(f"🚀 {name} iniciado!")
+        else:
+            logger.error(f"❌ {name} falhou ao iniciar na porta {port}. Verifique os logs do sistema.")
     except Exception as e:
         logger.error(f"Erro ao iniciar {name}: {e}")
 
@@ -47,6 +45,11 @@ def start_service(name, port, cmd):
 async def lifespan(app: FastAPI):
     setup_logging()
     logger.info("🌐 Iniciando UCDB-IA...")
+    
+    # Inicia Serviços Automaticamente se estiverem offline
+    start_service("Embedding Server", 8081, settings.CMD_EMBEDDING)
+    start_service("LLM Server", 8080, settings.CMD_LLM)
+    
     yield
     logger.info("🛑 Encerrando...")
     for p in _procs: p.terminate()

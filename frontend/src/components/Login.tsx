@@ -76,7 +76,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
             await fetchUserAndLogin(data.access_token);
         } catch (fetchErr) {
             onLogin(data.access_token, {
-                id: username,
+                id: data.id, // Agora usamos o ID que vem do signup
                 username: fullName,
                 role: 'aluno',
                 course: course

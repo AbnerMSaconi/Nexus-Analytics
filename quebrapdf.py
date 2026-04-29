@@ -2,6 +2,7 @@ import os
 import re
 from pypdf import PdfReader, PdfWriter
 from app.core.config import settings
+from app.utils.performance import monitor_perf
 
 def limpar_nome_arquivo(nome: str) -> str:
     """Remove caracteres inválidos para salvar o arquivo no Windows/Linux"""
@@ -97,6 +98,7 @@ if __name__ == "__main__":
     quebrar_pdf_por_capitulos(settings.pdf_path)
     print("Processo finalizado!")
 
+@monitor_perf("Quebra de PDF")
 def quebrar_arquivo_unico(caminho_completo: str) -> list:
     """
     Recebe o caminho de um único PDF recém-salvo.

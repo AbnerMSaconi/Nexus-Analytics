@@ -29,6 +29,7 @@ class UserLogin(BaseModel):
 class Token(BaseModel):
     access_token: str
     token_type: str
+    id: str
     role: str
     course: Optional[str] = None
 

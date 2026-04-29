@@ -20,8 +20,14 @@ export const DocumentManager: React.FC = () => {
   const [newAreaName, setNewAreaName] = useState('');
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const wsRef = useRef<WebSocket | null>(null);
 
-  useEffect(() => { loadData(); }, []);
+  useEffect(() => { 
+    loadData(); 
+    return () => {
+      if (wsRef.current) wsRef.current.close();
+    };
+  }, []);
 
   const loadData = async () => {
     try {
@@ -34,6 +40,38 @@ export const DocumentManager: React.FC = () => {
     try { return JSON.parse(localStorage.getItem('nexus_user') || 'null'); } catch { return null; }
   })();
   const canIngest = user && ['professor', 'coordenador', 'administrador', 'admin'].includes(user.role);
+
+  // Conectar WebSocket para acompanhar progresso
+  const connectWebSocket = (userId: string) => {
+    if (wsRef.current) return;
+
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const host = import.meta.env.VITE_API_URL ? import.meta.env.VITE_API_URL.replace(/^https?:\/\//, '') : 'localhost:8000';
+    const ws = new WebSocket(`${protocol}//${host}/ws/${userId}`);
+
+    ws.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      if (data.type === 'processing_complete') {
+        setUploadStatus({ type: 'success', msg: data.message });
+        setUploading(false);
+        loadData();
+        
+        // Fecha após 3 segundos após o sucesso real
+        setTimeout(() => {
+          setShowModal(false);
+          setSelectedFiles([]);
+          setSelectedArea('');
+          setNewAreaName('');
+          setUploadStatus({ type: '', msg: '' });
+        }, 3000);
+      } else if (data.type === 'processing_warning') {
+        setUploadStatus({ type: 'info', msg: data.message });
+      }
+    };
+
+    ws.onclose = () => { wsRef.current = null; };
+    wsRef.current = ws;
+  };
 
   const toggleFolder = (folderId: string) => {
     setExpandedFolders(prev => ({ ...prev, [folderId]: !prev[folderId] }));
@@ -67,29 +105,26 @@ export const DocumentManager: React.FC = () => {
       setUploadStatus({ type: 'error', msg: 'Selecione ao menos um arquivo.' });
       return;
     }
-    if (!token) return;
+    if (!token || !user) return;
 
     setUploading(true);
-    setUploadStatus({ type: 'info', msg: 'Enviando e processando vetores. Isso pode levar alguns minutos...' });
+    setUploadStatus({ type: 'info', msg: 'Enviando arquivos para o servidor...' });
 
     try {
+      // Abre conexão WS antes ou durante o upload para garantir que pegamos a volta
+      connectWebSocket(user.id);
+      
       await api.uploadDocumentsToArea(finalArea, selectedFiles, token);
       
-      setUploadStatus({ type: 'success', msg: 'Sucesso! Vetores indexados e salvos.' });
-      await loadData();
+      setUploadStatus({ 
+        type: 'info', 
+        msg: 'Arquivos enviados! O servidor está fatiando e indexando os vetores agora. Aguarde...' 
+      });
       
-      // Limpar formulário e fechar após 2s
-      setTimeout(() => {
-        setShowModal(false);
-        setSelectedFiles([]);
-        setSelectedArea('');
-        setNewAreaName('');
-        setUploadStatus({ type: '', msg: '' });
-      }, 2000);
+      // O fechamento agora acontece no onmessage do WebSocket
       
     } catch (error: any) {
       setUploadStatus({ type: 'error', msg: `Erro: ${error.message}` });
-    } finally {
       setUploading(false);
     }
   };

@@ -23,7 +23,7 @@ except ImportError:
     raise
 
 from langchain_community.document_loaders import PyPDFLoader, TextLoader, Docx2txtLoader
-import pdfplumber
+from pypdf import PdfReader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 # --- IMPORTS DO PROJETO ---
@@ -33,6 +33,11 @@ from app.core.embeddings import get_embeddings
 from app.core.llm import get_llm
 from functools import lru_cache
 import collections
+from concurrent.futures import ThreadPoolExecutor
+from app.utils.performance import monitor_perf, PerformanceMonitor
+
+# Executor global para tarefas síncronas pesadas (I/O de arquivos FAISS)
+_io_executor = ThreadPoolExecutor(max_workers=4)
 
 # Cache com limite de tamanho para evitar estouro de memória (LRU básico)
 class VectorStoreCache:
@@ -82,16 +87,15 @@ def _normalizar_nome_area(nome_pasta: str) -> str:
     return re.sub(r'[^a-z0-9_]', '', limpo)
 
 def _is_pdf_image_only(file_path: str) -> bool:
+    """Verifica se o PDF é apenas imagem usando pypdf (mais leve que pdfplumber)."""
     try:
-        with pdfplumber.open(file_path) as pdf:
-            text_content = ""
-            # Verifica as 3 primeiras páginas
-            for page in pdf.pages[:3]:
-                text = page.extract_text() or ""
-                text_content += text
-            
-            # Se tiver menos de 50 caracteres em 3 páginas, provavelmente é imagem
-            return len(text_content.strip()) < 50
+        reader = PdfReader(file_path)
+        text_content = ""
+        # Verifica as 3 primeiras páginas
+        for i in range(min(3, len(reader.pages))):
+            text_content += reader.pages[i].extract_text() or ""
+        
+        return len(text_content.strip()) < 50
     except:
         return False
 
@@ -120,20 +124,35 @@ def _salvar_manifesto(caminho_indice: str, dados: dict):
 def format_docs(docs):
     return "\n\n".join(f"[Fonte: {d.metadata.get('source', 'Doc')}] {d.page_content}" for d in docs)
 
+@monitor_perf("Reranking de Documentos")
 def _rerank_documents(question: str, docs: List[Any]) -> List[Any]:
     """
-    Usa uma lógica simplificada para garantir que os documentos passados 
-    realmente tenham relação com a pergunta, evitando ruído.
+    Otimização de Reranking: Filtra e ordena documentos para garantir alta relevância.
+    Prioriza documentos com maior densidade de palavras-chave da pergunta.
     """
     if not docs: return []
     
-    # Em uma implementação avançada, usaríamos um modelo de Cross-Encoder aqui.
-    # Como queremos manter leve, vamos apenas garantir que não passamos 
-    # documentos vazios ou excessivamente curtos que podem ser ruído de OCR.
-    filtered_docs = [d for d in docs if len(d.page_content.strip()) > 20]
+    # 1. Filtro básico de qualidade
+    docs = [d for d in docs if len(d.page_content.strip()) > 30]
     
-    # Retorna os top K (ajustado se necessário)
-    return filtered_docs[:settings.RETRIEVAL_K]
+    if not question: return docs[:settings.RETRIEVAL_K]
+    
+    # 2. Reranking simplificado por frequência de termos (BM25 'light')
+    words = set(re.findall(r'\w+', question.lower()))
+    
+    scored_docs = []
+    for d in docs:
+        content_lower = d.page_content.lower()
+        score = sum(1 for w in words if w in content_lower)
+        # Bônus se as palavras aparecerem no tópico/título
+        topic = d.metadata.get("topic", "").lower()
+        score += sum(2 for w in words if w in topic)
+        scored_docs.append((score, d))
+    
+    # Ordena pelo score (maior primeiro)
+    scored_docs.sort(key=lambda x: x[0], reverse=True)
+    
+    return [d for score, d in scored_docs if score > 0][:settings.RETRIEVAL_K]
 
 def _sanitizar_resposta(texto: str) -> str:
     if not texto: return ""
@@ -142,72 +161,47 @@ def _sanitizar_resposta(texto: str) -> str:
     return texto_limpo
 
 # ==============================================================================
-# 2. GERADOR DE TÍTULOS (IA BLINDADA)
+# 2. GERADOR DE TÍTULOS (IA BLINDADA - ASYNC)
 # ==============================================================================
 
-def _gerar_topico_documento(texto_bruto: str) -> str:
-    """Usa o LLM para dar um nome descritivo ao conteúdo do arquivo."""
-    
-    # 1. Reduzimos a amostra e removemos quebras de linha
+async def _gerar_topico_documento_async(texto_bruto: str) -> str:
+    """Usa o LLM para dar um nome descritivo ao conteúdo do arquivo (Versão Async)."""
     amostra = texto_bruto[:1000].replace("\n", " ").strip()
     
-    # 2. Prompt Engenharia Reversa
     system_instruction = """ATENÇÃO: Você é uma API de extração de metadados. 
     Sua ÚNICA função é ler o texto e extrair um Tópico Central de 3 a 6 palavras.
-    
-    REGRAS DE OURO:
-    1. NÃO use listas, bullets ou explicações.
-    2. NÃO inicie com "O texto fala sobre...".
-    3. Retorne APENAS o título.
-    
-    
-    Exemplo Entrada: "...O protocolo TCP/IP é a base da internet..."
-    Exemplo Saída: Protocolo de Redes TCP/IP"""
+    REGRAS: 1. APENAS o título. 2. Sem 'O texto fala sobre'. 3. Máximo 6 palavras."""
 
     prompt = ChatPromptTemplate.from_messages([
         ("system", system_instruction),
         ("human", "TEXTO PARA ANÁLISE:\n---\n{texto_amostra}\n---\n\nTÓPICO CENTRAL:")
     ])
 
-    chain = prompt | get_llm() | StrOutputParser()
+    chain = prompt | get_cached_llm() | StrOutputParser()
 
     try:
-        raw_titulo = chain.invoke({"texto_amostra": amostra}).strip()
-        
-        # 3. Pós-Processamento Brutal (Python)
-        titulo = raw_titulo.replace('"', '').replace("'", "").replace("*", "").replace("#", "")
+        raw_titulo = await chain.ainvoke({"texto_amostra": amostra})
+        titulo = raw_titulo.strip().replace('"', '').replace("'", "").replace("*", "").replace("#", "")
         titulo = re.sub(r'^(Título|Tópico|Assunto|Tema|Title|Topic):\s*', '', titulo, flags=re.IGNORECASE)
-        
-        if "\n" in titulo:
-            linhas = [l.strip() for l in titulo.split('\n') if l.strip()]
-            titulo = min(linhas, key=len) if linhas else "Documento Processado"
-
-        # 4. Corte de Segurança Final
-        if len(titulo) > 60:
-            palavras = titulo.split()
-            if len(palavras) > 5:
-                titulo = " ".join(palavras[:5])
-            else:
-                titulo = "Documento Acadêmico"
-
-        return titulo.strip()
-
+        return titulo.strip()[:60]
     except Exception as e:
-        logger.error(f"Erro ao gerar título: {e}")
+        logger.error(f"Erro ao gerar título async: {e}")
         return "Documento Processado"
 
 # ==============================================================================
-# 3. INGESTÃO GLOBAL BLINDADA (VARREDURA COMPLETA)
+# 3. INGESTÃO GLOBAL BLINDADA (VARREDURA COMPLETA - ASYNC)
 # ==============================================================================
 
-def atualizar_base_de_conhecimento():
-    logger.info("🔄 Iniciando sincronização INTELIGENTE global...")
+async def atualizar_base_de_conhecimento_async():
+    logger.info("🔄 Iniciando sincronização INTELIGENTE global (ASYNC)...")
     
     if not os.path.exists(settings.pdf_path):
         os.makedirs(settings.pdf_path)
         return
-    logger.info("🔪 Verificando se há arquivos gigantes para fatiar antes da indexação...")
-    quebrar_pdf_por_capitulos(settings.pdf_path)
+    
+    from quebrapdf import quebrar_pdf_por_capitulos
+    # Offload heavy PDF splitting to thread
+    await asyncio.get_event_loop().run_in_executor(_io_executor, lambda: quebrar_pdf_por_capitulos(settings.pdf_path))
 
     emb_model = get_cached_embeddings()
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=settings.CHUNK_SIZE, chunk_overlap=settings.CHUNK_OVERLAP)
@@ -215,7 +209,6 @@ def atualizar_base_de_conhecimento():
     itens = os.listdir(settings.pdf_path)
     areas = [d for d in itens if os.path.isdir(os.path.join(settings.pdf_path, d))]
     
-    # Suporte a múltiplos formatos
     formatos_suportados = ('.pdf', '.docx', '.txt')
     if any(f.lower().endswith(formatos_suportados) for f in itens): areas.append("Geral")
 
@@ -223,27 +216,17 @@ def atualizar_base_de_conhecimento():
         area_key = _normalizar_nome_area(nome_pasta)
         origem = settings.pdf_path if nome_pasta == "Geral" else os.path.join(settings.pdf_path, nome_pasta)
         
-        if nome_pasta == "Geral":
-            arquivos = [f for f in itens if f.lower().endswith(formatos_suportados)]
-        else:
-            arquivos = [f for f in os.listdir(origem) if f.lower().endswith(formatos_suportados)]
-
+        arquivos = [f for f in os.listdir(origem) if f.lower().endswith(formatos_suportados)]
         if not arquivos: continue
 
         caminho_indice = os.path.join(settings.vectorstore_path, f"index_{area_key}")
-        if not os.path.exists(caminho_indice): os.makedirs(caminho_indice)
-
+        os.makedirs(caminho_indice, exist_ok=True)
         manifesto = _carregar_manifesto(caminho_indice)
         
-        pendentes = []
-        for arq in arquivos:
-            if arq not in manifesto or isinstance(manifesto[arq], str) or "title" not in manifesto[arq]:
-                pendentes.append(arq)
-
+        pendentes = [arq for arq in arquivos if arq not in manifesto or "title" not in manifesto[arq]]
         if not pendentes: continue
 
         logger.info(f"🚀 Área '{nome_pasta}': Atualizando {len(pendentes)} arquivos.")
-        
         docs_para_indexar = []
         
         for i, arq in enumerate(pendentes, 1):
@@ -251,17 +234,15 @@ def atualizar_base_de_conhecimento():
                 logger.info(f"🧠 [{i}/{len(pendentes)}] Analisando: {arq}")
                 loader = _get_loader(os.path.join(origem, arq))
                 if not loader: continue
-                full_docs = loader.load() 
                 
-                amostra_titulo = full_docs[:3] 
-                texto_para_titulo = " ".join([d.page_content for d in amostra_titulo])
-                titulo_gerado = _gerar_topico_documento(texto_para_titulo)
-                logger.info(f"   🏷️ Título Gerado: {titulo_gerado}")
+                full_docs = await asyncio.get_event_loop().run_in_executor(_io_executor, loader.load)
+                if not full_docs: continue
+
+                texto_para_titulo = " ".join([d.page_content for d in full_docs[:3]])
+                titulo_gerado = await _gerar_topico_documento_async(texto_para_titulo)
 
                 for d in full_docs:
-                    d.metadata["source"] = arq
-                    d.metadata["area"] = nome_pasta
-                    d.metadata["topic"] = titulo_gerado
+                    d.metadata.update({"source": arq, "area": nome_pasta, "topic": titulo_gerado})
                 
                 chunks = text_splitter.split_documents(full_docs)
                 docs_para_indexar.extend(chunks)
@@ -272,136 +253,105 @@ def atualizar_base_de_conhecimento():
                     "pages_indexed": len(full_docs),
                     "last_updated": datetime.now().isoformat()
                 }
-                
             except Exception as e:
                 logger.error(f"❌ Erro ao processar {arq}: {e}")
 
         if docs_para_indexar:
-            try:
+            def _save_faiss():
                 if os.path.exists(os.path.join(caminho_indice, "index.faiss")):
-                    vs_atual = FAISS.load_local(caminho_indice, emb_model, allow_dangerous_deserialization=True)
-                    vs_atual.add_documents(docs_para_indexar) 
-                    vs_atual.save_local(caminho_indice)
+                    vs = FAISS.load_local(caminho_indice, emb_model, allow_dangerous_deserialization=True)
+                    vs.add_documents(docs_para_indexar) 
+                    vs.save_local(caminho_indice)
                 else:
-                    # Força a criação da pasta antes de salvar
-                    os.makedirs(caminho_indice, exist_ok=True)
-                    vs_novo = FAISS.from_documents(docs_para_indexar, emb_model)
-                    vs_novo.save_local(caminho_indice)
-                
-                _salvar_manifesto(caminho_indice, manifesto)
-                logger.success(f"💾 Índice '{area_key}' salvo com sucesso.")
-            except Exception as index_err:
-                logger.error(f"❌ Erro crítico ao salvar índice FAISS: {index_err}")
+                    vs = FAISS.from_documents(docs_para_indexar, emb_model)
+                    vs.save_local(caminho_indice)
+
+            await asyncio.get_event_loop().run_in_executor(_io_executor, _save_faiss)
+            _salvar_manifesto(caminho_indice, manifesto)
+            _vs_cache.delete(caminho_indice)
 
 # ==============================================================================
-# 3.1. INGESTÃO SELETIVA (APENAS UMA ÁREA E ARQUIVOS ESPECÍFICOS) - NOVO!
+# 3.1. INGESTÃO SELETIVA (ASYNC)
 # ==============================================================================
 
-def processar_area_especifica(area: str, caminhos_arquivos: List[str], user_id: str = None):
+@monitor_perf("Vetorização de Área")
+async def processar_area_especifica_async(area: str, caminhos_arquivos: List[str], user_id: str = None):
     """
     Recebe os caminhos físicos dos arquivos recém-salvos e atualiza APENAS o 
     vectorstore e o manifesto correspondentes a essa área de conhecimento.
+    Utiliza indexação incremental para poupar memória RAM.
     """
-    logger.info(f"🔄 Processando {len(caminhos_arquivos)} arquivos para a área: {area}")
+    logger.info(f"🔄 Processando {len(caminhos_arquivos)} arquivos para a área: {area} (ASYNC)")
     
     area_key = _normalizar_nome_area(area)
     caminho_indice = os.path.join(settings.vectorstore_path, f"index_{area_key}")
-    
-    if not os.path.exists(caminho_indice):
-        os.makedirs(caminho_indice)
+    os.makedirs(caminho_indice, exist_ok=True)
 
     emb_model = get_cached_embeddings()
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=settings.CHUNK_SIZE, chunk_overlap=settings.CHUNK_OVERLAP)
     
     manifesto = _carregar_manifesto(caminho_indice)
-    docs_para_indexar = []
     
     for arq_path in caminhos_arquivos:
         nome_arquivo = os.path.basename(arq_path)
         try:
-            logger.info(f"🧠 Analisando arquivo específico: {nome_arquivo}")
-            
-            # Verificação de PDF de Imagem
+            # 1. Verificação de Imagem (Leve)
             if arq_path.lower().endswith('.pdf') and _is_pdf_image_only(arq_path):
-                logger.warning(f"⚠️ O arquivo {nome_arquivo} parece ser apenas imagem (OCR necessário).")
+                logger.warning(f"⚠️ O arquivo {nome_arquivo} parece ser apenas imagem.")
                 if user_id:
-                    asyncio.run(manager.send_personal_message({
+                    await manager.send_personal_message({
                         "type": "processing_warning",
-                        "message": f"O arquivo '{nome_arquivo}' parece ser uma imagem digitalizada. A IA pode ter dificuldade em ler o conteúdo sem OCR."
-                    }, user_id))
+                        "message": f"O arquivo '{nome_arquivo}' parece ser uma imagem digitalizada."
+                    }, user_id)
 
+            # 2. Carregamento e Fatiamento
             loader = _get_loader(arq_path)
             if not loader: continue
-            full_docs = loader.load()
+            full_docs = await asyncio.get_event_loop().run_in_executor(_io_executor, loader.load)
+            if not full_docs: continue
             
-            if not full_docs:
-                continue
+            # 3. Metadados e Títulos
+            texto_para_titulo = " ".join([d.page_content for d in full_docs[:3]])
+            titulo_gerado = await _gerar_topico_documento_async(texto_para_titulo)
             
-            # Gera título com uma pequena amostra para economizar tokens
-            amostra_titulo = full_docs[:3]
-            texto_para_titulo = " ".join([d.page_content for d in amostra_titulo])
-            titulo_gerado = _gerar_topico_documento(texto_para_titulo)
-            
-            logger.info(f"   🏷️ Título Gerado: {titulo_gerado}")
-
-            # Adiciona metadados
             for d in full_docs:
-                d.metadata["source"] = nome_arquivo
-                d.metadata["area"] = area
-                d.metadata["topic"] = titulo_gerado
+                d.metadata.update({"source": nome_arquivo, "area": area, "topic": titulo_gerado})
                 
             chunks = text_splitter.split_documents(full_docs)
-            docs_para_indexar.extend(chunks)
             
-            # Atualiza manifesto para exibição no frontend
+            # 4. Indexação Incremental (Arquivo por Arquivo) para não explodir a RAM
+            def _update_faiss_incremental(docs):
+                indice_faiss_path = os.path.join(caminho_indice, "index.faiss")
+                if os.path.exists(indice_faiss_path):
+                    vs = FAISS.load_local(caminho_indice, emb_model, allow_dangerous_deserialization=True)
+                    vs.add_documents(docs)
+                    vs.save_local(caminho_indice)
+                else:
+                    vs = FAISS.from_documents(docs, emb_model)
+                    vs.save_local(caminho_indice)
+
+            await asyncio.get_event_loop().run_in_executor(_io_executor, lambda: _update_faiss_incremental(chunks))
+            
+            # 5. Atualiza Manifesto
             manifesto[nome_arquivo] = {
-                "status": "indexed",
-                "title": titulo_gerado,
-                "pages_indexed": len(full_docs),
-                "last_updated": datetime.now().isoformat() 
+                "status": "indexed", "title": titulo_gerado,
+                "pages_indexed": len(full_docs), "last_updated": datetime.now().isoformat() 
             }
+            _salvar_manifesto(caminho_indice, manifesto)
+            
+            # Limpa referências para o GC
+            del full_docs
+            del chunks
             
         except Exception as e:
             logger.error(f"❌ Erro ao processar {nome_arquivo}: {e}")
             
-    if docs_para_indexar:
-        try:
-            indice_faiss_path = os.path.join(caminho_indice, "index.faiss")
-            # Força a criação da pasta da área antes de tentar salvar
-            os.makedirs(caminho_indice, exist_ok=True)
-            
-            if os.path.exists(indice_faiss_path):
-                # Anexa aos vetores existentes
-                vs_atual = FAISS.load_local(caminho_indice, emb_model, allow_dangerous_deserialization=True)
-                vs_atual.add_documents(docs_para_indexar)
-                vs_atual.save_local(caminho_indice)
-            else:
-                # Cria a nova base do zero
-                vs_novo = FAISS.from_documents(docs_para_indexar, emb_model)
-                vs_novo.save_local(caminho_indice)
-                
-            _salvar_manifesto(caminho_indice, manifesto)
-            logger.info(f"💾 Índice '{area_key}' atualizado/criado com sucesso via modal seletivo.")
-            
-            # Limpa o cache para forçar a recarga no próximo RAG
-            _vs_cache.delete(caminho_indice)
-
-            # --- NOTIFICAÇÃO WEBSOCKET ---
-            if user_id:
-                asyncio.run(manager.send_personal_message({
-                    "type": "processing_complete",
-                    "area": area,
-                    "message": f"Vetorização de {len(caminhos_arquivos)} arquivos em '{area.capitalize()}' concluída!"
-                }, user_id))
-                
-        except Exception as index_err:
-            logger.error(f"❌ Erro crítico ao salvar índice FAISS na área específica: {index_err}")
-            if user_id:
-                asyncio.run(manager.send_personal_message({
-                    "type": "processing_error",
-                    "message": f"Erro ao processar arquivos em '{area}': {str(index_err)}"
-                }, user_id))
-            raise index_err
+    _vs_cache.delete(caminho_indice)
+    if user_id:
+        await manager.send_personal_message({
+            "type": "processing_complete", "area": area,
+            "message": f"Vetorização de {len(caminhos_arquivos)} arquivos concluída!"
+        }, user_id)
 # ==============================================================================
 # 3.2. GERENCIADOR DE PERSONAS (PROMPTS DINÂMICOS)
 # ==============================================================================
@@ -497,37 +447,62 @@ REGRAS DE RESPOSTA:
 5. NUNCA invente dados ou utilize conhecimento externo."""
 
 # ==============================================================================
-# 4. CHAT RAG
+# 5. RAG CHAIN ASYNC (OTIMIZADA PARA PERFORMANCE)
 # ==============================================================================
 
-def get_rag_chain(area: str = "Geral"):
-    area_key = _normalizar_nome_area(area) if area else "geral"
+@monitor_perf("Criação de RAG Chain")
+async def get_rag_chain_async(area: str = "Geral"):
+    """
+    Versão assíncrona do RAG Chain. Carrega o índice FAISS em uma thread separada
+    para não travar o loop de eventos do FastAPI.
+    """
+    # 1. Normalização inteligente da área
+    if not area or area.lower().strip() == "geral":
+        area_key = "geral"
+    else:
+        area_key = _normalizar_nome_area(area)
+
     caminho_indice = os.path.join(settings.vectorstore_path, f"index_{area_key}")
-    
+
+    # Fallback: Se não existe index_area, tenta o index_geral se a área for nula
     if not os.path.exists(caminho_indice):
-        # Evita responder perguntas usando índices errados
-        logger.error(f"Índice não encontrado para a área: {area_key}")
+        logger.warning(f"Índice não encontrado para a área: {area_key}. Tentando fallback 'geral'...")
+        area_key = "geral"
+        caminho_indice = os.path.join(settings.vectorstore_path, f"index_{area_key}")
+
+    if not os.path.exists(caminho_indice):
+        logger.error(f"Nenhum índice encontrado (nem mesmo fallback 'geral').")
         return None
 
+    # Tenta obter do cache
     vectorstore = _vs_cache.get(caminho_indice)
+
     if not vectorstore:
         emb_model = get_cached_embeddings()
-        vectorstore = FAISS.load_local(caminho_indice, emb_model, allow_dangerous_deserialization=True)
-        _vs_cache.set(caminho_indice, vectorstore)
+        # Carrega o índice FAISS em uma thread para não travar o loop async
+        try:
+            vectorstore = await asyncio.get_event_loop().run_in_executor(
+                _io_executor, 
+                lambda: FAISS.load_local(caminho_indice, emb_model, allow_dangerous_deserialization=True)
+            )
+            _vs_cache.set(caminho_indice, vectorstore)
+        except Exception as e:
+            logger.error(f"Erro ao carregar índice FAISS {area_key}: {e}")
+            return None
 
     retriever = vectorstore.as_retriever(search_kwargs={"k": settings.RETRIEVAL_K})
-    
+
+    # LLM Bindado com tokens de parada
     llm = get_cached_llm().bind(stop=["Human:", "User:", "Question:", "System:", "<|im_end|>", "<|eot_id|>"])
 
-    # === AQUI ESTÁ A MÁGICA DA PERSONA ===
     system_msg = _obter_prompt_persona(area)
-    
+
     prompt = ChatPromptTemplate.from_messages([
         ("system", system_msg),
         MessagesPlaceholder(variable_name="chat_history"),
         ("user", "{question}")
     ])
-    
+
     chain = (
         RunnableParallel({
             "context": itemgetter("question") | retriever | RunnableLambda(lambda docs: _rerank_documents("", docs)),
@@ -543,5 +518,5 @@ def get_rag_chain(area: str = "Geral"):
         ))
         .pick(["answer", "context"])
     )
-    
+
     return chain | RunnableLambda(lambda x: {"answer": x["answer"], "source_documents": x["context"]})

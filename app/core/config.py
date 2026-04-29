@@ -36,15 +36,26 @@ class Settings(BaseSettings):
         "--embedding", "--port", "8081"
     ]
 
+    # PARÂMETROS DE ESCALABILIDADE (Ajustados para Hardware Local)
+    # ATENÇÃO: Cada slot (-np) reserva memória (KV Cache). 
+    # Para 32k de contexto, cada slot consome ~7GB de RAM/VRAM.
+    # Valores seguros para máquinas locais: -np 2 a 4.
+    LLM_PARALLEL: int = os.getenv("LLM_PARALLEL", 4) 
+    
     # MODELO LLM (Qwen 3B/4B Instruct)
-    CMD_LLM: list = [
-        "llama-server", 
-        "-m", "qwen2.5-3b-instruct-q4_k_m.gguf", 
-        "--port", "8080", 
-        "-fa", "1",
-        "-c", "32768",
-        "-ngl", "99"
-    ]
+    @property
+    def CMD_LLM(self) -> list:
+        return [
+            "llama-server", 
+            "-m", "qwen2.5-3b-instruct-q4_k_m.gguf", 
+            "--port", "8080", 
+            "-fa", "1",           # Flash Attention
+            "-c", "8192",         # Contexto reduzido de 32k para 8k (Estabilidade)
+            "-ngl", "99",         # Máximo de camadas na GPU
+            "-np", str(self.LLM_PARALLEL), # Slots paralelos seguros
+            "--cont-batching",    # Continuous Batching
+            "-cb"
+        ]
     
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=False, extra="ignore")
 
