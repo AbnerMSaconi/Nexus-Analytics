@@ -277,11 +277,10 @@ async def atualizar_base_de_conhecimento_async():
 @monitor_perf("Vetorização de Área")
 async def processar_area_especifica_async(area: str, caminhos_arquivos: List[str], user_id: str = None):
     """
-    Recebe os caminhos físicos dos arquivos recém-salvos e atualiza APENAS o 
-    vectorstore e o manifesto correspondentes a essa área de conhecimento.
-    Utiliza indexação incremental para poupar memória RAM.
+    Versão OTIMIZADA: Processa arquivos em lotes para evitar gargalos de I/O no FAISS
+    e utiliza paralelismo controlado para geração de títulos.
     """
-    logger.info(f"🔄 Processando {len(caminhos_arquivos)} arquivos para a área: {area} (ASYNC)")
+    logger.info(f"🔄 Processando {len(caminhos_arquivos)} arquivos para a área: {area} (BATCH MODE)")
     
     area_key = _normalizar_nome_area(area)
     caminho_indice = os.path.join(settings.vectorstore_path, f"index_{area_key}")
@@ -289,38 +288,61 @@ async def processar_area_especifica_async(area: str, caminhos_arquivos: List[str
 
     emb_model = get_cached_embeddings()
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=settings.CHUNK_SIZE, chunk_overlap=settings.CHUNK_OVERLAP)
-    
     manifesto = _carregar_manifesto(caminho_indice)
     
-    for arq_path in caminhos_arquivos:
-        nome_arquivo = os.path.basename(arq_path)
-        try:
-            # 1. Verificação de Imagem (Leve)
-            if arq_path.lower().endswith('.pdf') and _is_pdf_image_only(arq_path):
-                logger.warning(f"⚠️ O arquivo {nome_arquivo} parece ser apenas imagem.")
-                if user_id:
-                    await manager.send_personal_message({
-                        "type": "processing_warning",
-                        "message": f"O arquivo '{nome_arquivo}' parece ser uma imagem digitalizada."
-                    }, user_id)
-
-            # 2. Carregamento e Fatiamento
-            loader = _get_loader(arq_path)
-            if not loader: continue
-            full_docs = await asyncio.get_event_loop().run_in_executor(_io_executor, loader.load)
-            if not full_docs: continue
-            
-            # 3. Metadados e Títulos
-            texto_para_titulo = " ".join([d.page_content for d in full_docs[:3]])
-            titulo_gerado = await _gerar_topico_documento_async(texto_para_titulo)
-            
-            for d in full_docs:
-                d.metadata.update({"source": nome_arquivo, "area": area, "topic": titulo_gerado})
+    # Controle de concorrência para não sobrecarregar o LLM/Embedding
+    semaphore = asyncio.Semaphore(5) 
+    
+    async def processar_arquivo(arq_path):
+        async with semaphore:
+            nome_arquivo = os.path.basename(arq_path)
+            try:
+                loader = _get_loader(arq_path)
+                if not loader: return None, []
                 
-            chunks = text_splitter.split_documents(full_docs)
-            
-            # 4. Indexação Incremental (Arquivo por Arquivo) para não explodir a RAM
-            def _update_faiss_incremental(docs):
+                full_docs = await asyncio.get_event_loop().run_in_executor(_io_executor, loader.load)
+                if not full_docs: return None, []
+                
+                # Título inteligente
+                texto_para_titulo = " ".join([d.page_content for d in full_docs[:3]])
+                titulo_gerado = await _gerar_topico_documento_async(texto_para_titulo)
+                
+                for d in full_docs:
+                    d.metadata.update({"source": nome_arquivo, "area": area, "topic": titulo_gerado})
+                
+                chunks = text_splitter.split_documents(full_docs)
+                
+                meta = {
+                    "filename": nome_arquivo,
+                    "data": {
+                        "status": "indexed", "title": titulo_gerado,
+                        "pages_indexed": len(full_docs), "last_updated": datetime.now().isoformat()
+                    }
+                }
+                return meta, chunks
+            except Exception as e:
+                logger.error(f"❌ Erro ao processar {arq_path}: {e}")
+                return None, []
+
+    # Processa em lotes de 25 arquivos para não travar a memória mas reduzir o I/O de disco
+    tamanho_lote = 25
+    for i in range(0, len(caminhos_arquivos), tamanho_lote):
+        lote_atual = caminhos_arquivos[i:i + tamanho_lote]
+        logger.info(f"📦 Processando lote {i//tamanho_lote + 1} ({len(lote_atual)} arquivos)...")
+        
+        # Executa o lote em paralelo (respeitando o semaphore de 5)
+        resultados = await asyncio.gather(*[processar_arquivo(f) for f in lote_atual])
+        
+        todos_chunks_lote = []
+        for meta, chunks in resultados:
+            if meta:
+                manifesto[meta["filename"]] = meta["data"]
+            if chunks:
+                todos_chunks_lote.extend(chunks)
+        
+        # Atualiza o FAISS uma única vez por lote (Ganha MUITO tempo de I/O)
+        if todos_chunks_lote:
+            def _update_faiss_batch(docs):
                 indice_faiss_path = os.path.join(caminho_indice, "index.faiss")
                 if os.path.exists(indice_faiss_path):
                     vs = FAISS.load_local(caminho_indice, emb_model, allow_dangerous_deserialization=True)
@@ -330,27 +352,15 @@ async def processar_area_especifica_async(area: str, caminhos_arquivos: List[str
                     vs = FAISS.from_documents(docs, emb_model)
                     vs.save_local(caminho_indice)
 
-            await asyncio.get_event_loop().run_in_executor(_io_executor, lambda: _update_faiss_incremental(chunks))
-            
-            # 5. Atualiza Manifesto
-            manifesto[nome_arquivo] = {
-                "status": "indexed", "title": titulo_gerado,
-                "pages_indexed": len(full_docs), "last_updated": datetime.now().isoformat() 
-            }
+            await asyncio.get_event_loop().run_in_executor(_io_executor, lambda: _update_faiss_batch(todos_chunks_lote))
             _salvar_manifesto(caminho_indice, manifesto)
-            
-            # Limpa referências para o GC
-            del full_docs
-            del chunks
-            
-        except Exception as e:
-            logger.error(f"❌ Erro ao processar {nome_arquivo}: {e}")
-            
+            logger.info(f"✅ Lote {i//tamanho_lote + 1} indexado e salvo.")
+
     _vs_cache.delete(caminho_indice)
     if user_id:
         await manager.send_personal_message({
             "type": "processing_complete", "area": area,
-            "message": f"Vetorização de {len(caminhos_arquivos)} arquivos concluída!"
+            "message": f"Vetorização de {len(caminhos_arquivos)} arquivos concluída com sucesso!"
         }, user_id)
 # ==============================================================================
 # 3.2. GERENCIADOR DE PERSONAS (PROMPTS DINÂMICOS)
