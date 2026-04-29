@@ -38,9 +38,8 @@ class Settings(BaseSettings):
 
     # PARÂMETROS DE ESCALABILIDADE (Ajustados para Hardware Local)
     # ATENÇÃO: Cada slot (-np) reserva memória (KV Cache). 
-    # Para 32k de contexto, cada slot consome ~7GB de RAM/VRAM.
-    # Valores seguros para máquinas locais: -np 2 a 4.
-    LLM_PARALLEL: int = os.getenv("LLM_PARALLEL", 4) 
+    # Valores seguros para 6GB de VRAM: -np 1.
+    LLM_PARALLEL: int = os.getenv("LLM_PARALLEL", 1) 
     
     # MODELO LLM (Qwen 3B/4B Instruct)
     @property

@@ -71,7 +71,14 @@ class LlamaEmbeddings(Embeddings):
 
     @monitor_perf("Vetorização de Documentos (Embeddings)")
     async def aembed_documents(self, texts: List[str]) -> List[List[float]]:
-        tasks = [self._get_single_embedding_async(_emb_client, text) for text in texts]
+        # Limitamos a concorrência para não estourar a RAM/Socket do servidor
+        semaphore = asyncio.Semaphore(32)
+        
+        async def sem_task(text):
+            async with semaphore:
+                return await self._get_single_embedding_async(_emb_client, text)
+
+        tasks = [sem_task(text) for text in texts]
         results = await asyncio.gather(*tasks)
         
         dim = self.dimension

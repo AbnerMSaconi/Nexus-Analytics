@@ -13,9 +13,11 @@ services:
       -m /models/qwen2.5-3b-instruct-q4_k_m.gguf
       --port 8080
       -fa 1
-      -c 32768
+      -c 8192
       -ngl 99
       --host 0.0.0.0
+      --cache-ram 0
+      -np 1
     deploy:
       resources:
         reservations:
@@ -39,6 +41,8 @@ services:
       --embedding
       --port 8081
       --host 0.0.0.0
+      -ngl 99
+      --cache-ram 0
     deploy:
       resources:
         reservations:

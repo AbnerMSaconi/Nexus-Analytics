@@ -247,19 +247,13 @@ async def upload_files_to_area(
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
             
-        if ext == '.pdf':
-            # === A MÁGICA ACONTECE APENAS PARA PDF ===
-            partes_geradas = quebrar_arquivo_unico(str(file_path))
-            arquivos_finais_para_vetorizar.extend(partes_geradas)
-        else:
-            # DOCX e TXT vão direto
-            arquivos_finais_para_vetorizar.append(str(file_path))
+        arquivos_finais_para_vetorizar.append(str(file_path))
         
-    log_activity(db, current_user, "FILE_UPLOAD", "INFO", f"Enviou {len(files)} arquivos e gerou {len(arquivos_finais_para_vetorizar)} partes na área {area}")
+    log_activity(db, current_user, "FILE_UPLOAD", "INFO", f"Enviou {len(files)} arquivos na área {area}")
     
-    # 4. Chama o pipeline de vetorização específico em background (agora com user_id para notificação)
+    # 4. Chama o pipeline de vetorização em background (A quebra de PDF agora acontece aqui dentro)
     from app.core.rag import processar_area_especifica_async
-    background_tasks.add_task(processar_area_especifica_async, area_clean, arquivos_finais_para_vetorizar, str(current_user.id))
+    background_tasks.add_task(processar_area_especifica_async, area_clean, arquivos_finais_para_vetorizar, str(current_user.id), True)
     
     return {
         "status": "processing", 

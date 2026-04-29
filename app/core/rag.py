@@ -199,9 +199,9 @@ async def atualizar_base_de_conhecimento_async():
         os.makedirs(settings.pdf_path)
         return
     
-    from quebrapdf import quebrar_pdf_por_capitulos
-    # Offload heavy PDF splitting to thread
-    await asyncio.get_event_loop().run_in_executor(_io_executor, lambda: quebrar_pdf_por_capitulos(settings.pdf_path))
+    # [DESATIVADO] A quebra de PDF no disco foi removida para poupar SSD/RAM
+    # from quebrapdf import quebrar_pdf_por_capitulos
+    # await asyncio.get_event_loop().run_in_executor(_io_executor, lambda: quebrar_pdf_por_capitulos(settings.pdf_path))
 
     emb_model = get_cached_embeddings()
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=settings.CHUNK_SIZE, chunk_overlap=settings.CHUNK_OVERLAP)
@@ -274,13 +274,46 @@ async def atualizar_base_de_conhecimento_async():
 # 3.1. INGESTÃO SELETIVA (ASYNC)
 # ==============================================================================
 
+from langchain_core.documents import Document
+
+def _carregar_pdf_eficiente(file_path: str) -> List[Document]:
+    """Lê o PDF página por página para economizar RAM."""
+    docs = []
+    try:
+        reader = PdfReader(file_path)
+        for i, page in enumerate(reader.pages):
+            text = page.extract_text()
+            if text:
+                docs.append(Document(
+                    page_content=text,
+                    metadata={"source": os.path.basename(file_path), "page": i + 1}
+                ))
+    except Exception as e:
+        logger.error(f"Erro ao ler PDF {file_path}: {e}")
+    return docs
+
+def _get_loader_data(file_path: str) -> List[Document]:
+    """Retorna os documentos extraídos de forma eficiente."""
+    ext = os.path.splitext(file_path)[1].lower()
+    if ext == '.pdf':
+        return _carregar_pdf_eficiente(file_path)
+    elif ext == '.docx':
+        from langchain_community.document_loaders import Docx2txtLoader
+        return Docx2txtLoader(file_path).load()
+    elif ext == '.txt':
+        from langchain_community.document_loaders import TextLoader
+        return TextLoader(file_path, encoding='utf-8').load()
+    return []
+
 @monitor_perf("Vetorização de Área")
-async def processar_area_especifica_async(area: str, caminhos_arquivos: List[str], user_id: str = None):
+async def processar_area_especifica_async(area: str, caminhos_arquivos: List[str], user_id: str = None, force_reindex: bool = False):
     """
-    Versão OTIMIZADA: Processa arquivos em lotes para evitar gargalos de I/O no FAISS
-    e utiliza paralelismo controlado para geração de títulos.
+    Versão OTIMIZADA E COMPLETA: 
+    1. Realiza a quebra inteligente (cortador) em background para não travar o sistema.
+    2. Lê os arquivos de forma eficiente página por página.
+    3. Mantém a organização por capítulos que o usuário solicitou.
     """
-    logger.info(f"🔄 Processando {len(caminhos_arquivos)} arquivos para a área: {area} (BATCH MODE)")
+    logger.info(f"🔄 Iniciando processamento de {len(caminhos_arquivos)} arquivos para: {area}")
     
     area_key = _normalizar_nome_area(area)
     caminho_indice = os.path.join(settings.vectorstore_path, f"index_{area_key}")
@@ -290,77 +323,116 @@ async def processar_area_especifica_async(area: str, caminhos_arquivos: List[str
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=settings.CHUNK_SIZE, chunk_overlap=settings.CHUNK_OVERLAP)
     manifesto = _carregar_manifesto(caminho_indice)
     
-    # Controle de concorrência para não sobrecarregar o LLM/Embedding
-    semaphore = asyncio.Semaphore(5) 
+    from quebrapdf import quebrar_arquivo_unico
     
-    async def processar_arquivo(arq_path):
-        async with semaphore:
-            nome_arquivo = os.path.basename(arq_path)
+    # 1. Primeiro, processamos a quebra dos arquivos se necessário (em background)
+    arquivos_finais = []
+    for arq_path in caminhos_arquivos:
+        if arq_path.lower().endswith(".pdf"):
+            if user_id:
+                await manager.send_personal_message({
+                    "type": "processing_warning", 
+                    "message": f"Analisando capítulos de {os.path.basename(arq_path)}..."
+                }, user_id)
+            
+            logger.info(f"✂️ Verificando capítulos para: {os.path.basename(arq_path)}")
+            partes = await asyncio.get_event_loop().run_in_executor(_io_executor, lambda: quebrar_arquivo_unico(arq_path))
+            
+            # Se não gerou partes novas, usa o arquivo original
+            if not partes:
+                arquivos_finais.append(arq_path)
+            else:
+                arquivos_finais.extend(partes)
+        else:
+            arquivos_finais.append(arq_path)
+
+    if user_id and len(arquivos_finais) > 5:
+        await manager.send_personal_message({
+            "type": "processing_warning", 
+            "message": f"Iniciando vetorização de {len(arquivos_finais)} partes..."
+        }, user_id)
+
+    # 2. Carrega o índice FAISS
+    vectorstore = None
+    if os.path.exists(os.path.join(caminho_indice, "index.faiss")):
+        try:
+            vectorstore = await asyncio.get_event_loop().run_in_executor(
+                _io_executor, 
+                lambda: FAISS.load_local(caminho_indice, emb_model, allow_dangerous_deserialization=True)
+            )
+        except Exception as e:
+            logger.error(f"Erro ao carregar índice FAISS: {e}")
+
+    # 3. Vetorização sequencial para poupar RAM
+    for arq_path in arquivos_finais:
+        nome_arquivo = os.path.basename(arq_path)
+        
+        # Logamos se estamos pulando ou processando
+        if not force_reindex and nome_arquivo in manifesto and manifesto[nome_arquivo].get("status") == "indexed":
+            logger.info(f"⏭️ Pulando {nome_arquivo} (já indexado).")
+            continue
+
+        logger.info(f"🧠 Analisando texto: {nome_arquivo}")
+        
+        full_docs = await asyncio.get_event_loop().run_in_executor(_io_executor, lambda: _get_loader_data(arq_path))
+        if not full_docs:
+            logger.warning(f"⚠️ Nenhum texto extraído de {nome_arquivo}. O PDF pode ser apenas imagem.")
+            continue
+
+        logger.info(f"📄 {nome_arquivo}: {len(full_docs)} páginas encontradas.")
+
+        # Título inteligente baseado no conteúdo
+        texto_para_titulo = " ".join([d.page_content for d in full_docs[:2]])
+        titulo_gerado = await _gerar_topico_documento_async(texto_para_titulo)
+
+        # Extração de título de capítulo se for parte
+        if "_parte_" in nome_arquivo:
             try:
-                loader = _get_loader(arq_path)
-                if not loader: return None, []
-                
-                full_docs = await asyncio.get_event_loop().run_in_executor(_io_executor, loader.load)
-                if not full_docs: return None, []
-                
-                # Título inteligente
-                texto_para_titulo = " ".join([d.page_content for d in full_docs[:3]])
-                titulo_gerado = await _gerar_topico_documento_async(texto_para_titulo)
-                
-                for d in full_docs:
-                    d.metadata.update({"source": nome_arquivo, "area": area, "topic": titulo_gerado})
-                
-                chunks = text_splitter.split_documents(full_docs)
-                
-                meta = {
-                    "filename": nome_arquivo,
-                    "data": {
-                        "status": "indexed", "title": titulo_gerado,
-                        "pages_indexed": len(full_docs), "last_updated": datetime.now().isoformat()
-                    }
-                }
-                return meta, chunks
-            except Exception as e:
-                logger.error(f"❌ Erro ao processar {arq_path}: {e}")
-                return None, []
+                parts = nome_arquivo.split("_")
+                if len(parts) > 4:
+                    titulo_capitulo = " ".join(parts[3:]).replace(".pdf", "").replace("_", " ")
+                    titulo_gerado = f"{titulo_capitulo} ({titulo_gerado})"
+            except: pass
 
-    # Processa em lotes de 25 arquivos para não travar a memória mas reduzir o I/O de disco
-    tamanho_lote = 25
-    for i in range(0, len(caminhos_arquivos), tamanho_lote):
-        lote_atual = caminhos_arquivos[i:i + tamanho_lote]
-        logger.info(f"📦 Processando lote {i//tamanho_lote + 1} ({len(lote_atual)} arquivos)...")
+        for d in full_docs:
+            d.metadata.update({"source": nome_arquivo, "area": area, "topic": titulo_gerado})
         
-        # Executa o lote em paralelo (respeitando o semaphore de 5)
-        resultados = await asyncio.gather(*[processar_arquivo(f) for f in lote_atual])
+        chunks = text_splitter.split_documents(full_docs)
+        del full_docs # Libera RAM
         
-        todos_chunks_lote = []
-        for meta, chunks in resultados:
-            if meta:
-                manifesto[meta["filename"]] = meta["data"]
-            if chunks:
-                todos_chunks_lote.extend(chunks)
-        
-        # Atualiza o FAISS uma única vez por lote (Ganha MUITO tempo de I/O)
-        if todos_chunks_lote:
-            def _update_faiss_batch(docs):
-                indice_faiss_path = os.path.join(caminho_indice, "index.faiss")
-                if os.path.exists(indice_faiss_path):
-                    vs = FAISS.load_local(caminho_indice, emb_model, allow_dangerous_deserialization=True)
+        if chunks:
+            logger.info(f"🚀 Enviando {len(chunks)} trechos para a GPU (Embedding)...")
+            
+            def _add_to_vs(vs, docs):
+                if vs:
                     vs.add_documents(docs)
-                    vs.save_local(caminho_indice)
+                    return vs
                 else:
-                    vs = FAISS.from_documents(docs, emb_model)
-                    vs.save_local(caminho_indice)
+                    return FAISS.from_documents(docs, emb_model)
 
-            await asyncio.get_event_loop().run_in_executor(_io_executor, lambda: _update_faiss_batch(todos_chunks_lote))
-            _salvar_manifesto(caminho_indice, manifesto)
-            logger.info(f"✅ Lote {i//tamanho_lote + 1} indexado e salvo.")
+            vectorstore = await asyncio.get_event_loop().run_in_executor(_io_executor, lambda: _add_to_vs(vectorstore, chunks))
+            
+            manifesto[nome_arquivo] = {
+                "status": "indexed", "title": titulo_gerado,
+                "chunks": len(chunks),
+                "last_updated": datetime.now().isoformat()
+            }
+            logger.info(f"✅ {nome_arquivo} indexado com sucesso.")
+        else:
+            logger.warning(f"⚠️ {nome_arquivo} gerou 0 trechos após divisão.")
 
-    _vs_cache.delete(caminho_indice)
+    # 4. Salva o índice final
+    if vectorstore:
+        logger.info(f"💾 Salvando índice final da área {area}...")
+        await asyncio.get_event_loop().run_in_executor(_io_executor, lambda: vectorstore.save_local(caminho_indice))
+        _salvar_manifesto(caminho_indice, manifesto)
+        _vs_cache.delete(caminho_indice)
+        logger.info(f"🎉 Processamento concluído!")
+
     if user_id:
         await manager.send_personal_message({
             "type": "processing_complete", "area": area,
-            "message": f"Vetorização de {len(caminhos_arquivos)} arquivos concluída com sucesso!"
+            "message": f"A base '{area}' foi atualizada com sucesso!"
         }, user_id)
 # ==============================================================================
 # 3.2. GERENCIADOR DE PERSONAS (PROMPTS DINÂMICOS)

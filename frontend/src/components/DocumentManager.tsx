@@ -6,6 +6,11 @@ import type { Folder as FolderType } from '../types';
 import { api } from '../assets/api';
 
 export const DocumentManager: React.FC = () => {
+  const user = React.useMemo(() => {
+    try { return JSON.parse(localStorage.getItem('nexus_user') || 'null'); } catch { return null; }
+  }, []);
+  const canIngest = user && ['professor', 'coordenador', 'administrador', 'admin'].includes(user.role);
+
   const [folders, setFolders] = useState<FolderType[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({});
@@ -13,6 +18,7 @@ export const DocumentManager: React.FC = () => {
   // Estados do Modal de Upload
   const [showModal, setShowModal] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [loadingData, setLoadingData] = useState(false);
   const [uploadStatus, setUploadStatus] = useState({ type: '', msg: '' });
   
   // Estados do Formulário
@@ -24,60 +30,97 @@ export const DocumentManager: React.FC = () => {
 
   useEffect(() => { 
     loadData(); 
+    // Tenta conectar o WebSocket ao carregar o componente para estar pronto
+    if (user?.id) connectWebSocket(user.id);
+
     return () => {
-      if (wsRef.current) wsRef.current.close();
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
     };
-  }, []);
+  }, [user]);
 
   const loadData = async () => {
+    setLoadingData(true);
     try {
       const data = await StorageService.getFolders();
       setFolders(data);
-    } catch (error) { console.error("Erro ao carregar:", error); }
+    } catch (error) { 
+      console.error("Erro ao carregar:", error); 
+    } finally {
+      setLoadingData(false);
+    }
   };
 
-  const user = (() => {
-    try { return JSON.parse(localStorage.getItem('nexus_user') || 'null'); } catch { return null; }
-  })();
-  const canIngest = user && ['professor', 'coordenador', 'administrador', 'admin'].includes(user.role);
+  const getFileIcon = (type: string) => {
+    switch (type) {
+      case 'pdf': return 'text-red-400';
+      case 'xlsx': return 'text-green-400';
+      case 'docx': return 'text-blue-400';
+      default: return 'text-slate-400';
+    }
+  };
 
   // Conectar WebSocket para acompanhar progresso
   const connectWebSocket = (userId: string) => {
-    if (wsRef.current) return;
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) return;
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = import.meta.env.VITE_API_URL ? import.meta.env.VITE_API_URL.replace(/^https?:\/\//, '') : 'localhost:8000';
-    const ws = new WebSocket(`${protocol}//${host}/ws/${userId}`);
+    try {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const host = import.meta.env.VITE_API_URL ? import.meta.env.VITE_API_URL.replace(/^https?:\/\//, '') : window.location.host;
+      
+      // Se o host já contém o protocolo (devido a VITE_API_URL), removemos
+      const cleanHost = host.replace(/^https?:\/\//, '');
+      
+      const ws = new WebSocket(`${protocol}//${cleanHost}/ws/${userId}`);
 
-    ws.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      if (data.type === 'processing_complete') {
-        setUploadStatus({ type: 'success', msg: data.message });
-        setUploading(false);
-        loadData();
-        
-        // Fecha após 3 segundos após o sucesso real
+      ws.onopen = () => console.log("✅ WebSocket conectado");
+      
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === 'processing_complete') {
+            setUploadStatus({ type: 'success', msg: data.message });
+            setUploading(false);
+            loadData();
+            
+            setTimeout(() => {
+              setShowModal(false);
+              setSelectedFiles([]);
+              setSelectedArea('');
+              setNewAreaName('');
+              setUploadStatus({ type: '', msg: '' });
+            }, 3000);
+          } else if (data.type === 'processing_warning') {
+            setUploadStatus({ type: 'info', msg: data.message });
+          }
+        } catch (e) {
+          console.error("Erro ao processar mensagem WS:", e);
+        }
+      };
+
+      ws.onclose = () => { 
+        wsRef.current = null;
+        // Tenta reconectar após 5 segundos se ainda estiver no manager
         setTimeout(() => {
-          setShowModal(false);
-          setSelectedFiles([]);
-          setSelectedArea('');
-          setNewAreaName('');
-          setUploadStatus({ type: '', msg: '' });
-        }, 3000);
-      } else if (data.type === 'processing_warning') {
-        setUploadStatus({ type: 'info', msg: data.message });
-      }
-    };
+          const u = JSON.parse(localStorage.getItem('nexus_user') || 'null');
+          if (u?.id) connectWebSocket(u.id);
+        }, 5000);
+      };
+      
+      ws.onerror = (err) => console.error("❌ Erro no WebSocket:", err);
 
-    ws.onclose = () => { wsRef.current = null; };
-    wsRef.current = ws;
+      wsRef.current = ws;
+    } catch (e) {
+      console.error("Falha ao criar WebSocket:", e);
+    }
   };
 
   const toggleFolder = (folderId: string) => {
     setExpandedFolders(prev => ({ ...prev, [folderId]: !prev[folderId] }));
   };
 
-  // Funções de manipulação de Arquivos
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
       const filesArray = Array.from(e.target.files);
@@ -93,57 +136,48 @@ export const DocumentManager: React.FC = () => {
   const handleUploadSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const token = localStorage.getItem('nexus_token');
-    
-    // Define a área alvo (existente ou nova)
     const finalArea = selectedArea === 'new' ? newAreaName : selectedArea;
 
-    if (!finalArea.trim()) {
-      setUploadStatus({ type: 'error', msg: 'Por favor, selecione ou digite o nome da área.' });
+    if (!finalArea.trim() || selectedFiles.length === 0 || !token || !user) {
+      setUploadStatus({ type: 'error', msg: 'Preencha todos os campos.' });
       return;
     }
-    if (selectedFiles.length === 0) {
-      setUploadStatus({ type: 'error', msg: 'Selecione ao menos um arquivo.' });
-      return;
-    }
-    if (!token || !user) return;
 
     setUploading(true);
-    setUploadStatus({ type: 'info', msg: 'Enviando arquivos para o servidor...' });
+    setUploadStatus({ type: 'info', msg: 'Enviando arquivos...' });
 
     try {
-      // Abre conexão WS antes ou durante o upload para garantir que pegamos a volta
       connectWebSocket(user.id);
-      
       await api.uploadDocumentsToArea(finalArea, selectedFiles, token);
       
       setUploadStatus({ 
         type: 'info', 
-        msg: 'Arquivos enviados! O servidor está fatiando e indexando os vetores agora. Aguarde...' 
+        msg: 'Arquivos enviados! O processamento foi iniciado.' 
       });
-      
-      // O fechamento agora acontece no onmessage do WebSocket
-      
+
+      // NOVO: Atualiza a lista imediatamente após o envio bem-sucedido
+      // Isso ajuda se o backend for muito rápido e o WebSocket ainda não estiver pronto.
+      setTimeout(loadData, 2000);
+
     } catch (error: any) {
       setUploadStatus({ type: 'error', msg: `Erro: ${error.message}` });
       setUploading(false);
     }
   };
 
-  const getFileIcon = (type: string) => {
-    switch (type) {
-      case 'pdf': return 'text-red-400';
-      case 'xlsx': return 'text-green-400';
-      default: return 'text-slate-400';
-    }
-  };
-
-  const filteredFolders = folders.map(folder => ({
-    ...folder,
-    documents: folder.documents.filter(doc => 
-      doc.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      doc.content.toLowerCase().includes(searchTerm.toLowerCase())
-    )
-  })).filter(f => f.documents.length > 0 || searchTerm === '');
+  // Otimização da Lista (IMPORTANTE PARA NÃO TRAVAR)
+  const filteredFolders = React.useMemo(() => {
+    if (!searchTerm.trim()) return folders;
+    
+    const term = searchTerm.toLowerCase();
+    return folders.map(folder => ({
+      ...folder,
+      documents: folder.documents.filter(doc => 
+        doc.title.toLowerCase().includes(term) ||
+        (doc.content && doc.content.toLowerCase().includes(term))
+      )
+    })).filter(f => f.documents.length > 0);
+  }, [folders, searchTerm]);
 
   return (
     <div className="h-full flex flex-col p-6 overflow-hidden relative">
@@ -241,7 +275,7 @@ export const DocumentManager: React.FC = () => {
               <h2 className="text-lg font-bold flex items-center gap-2">
                 <FileUp className="w-5 h-5 text-blue-500"/> Enviar para a Base de Dados
               </h2>
-              <button onClick={() => !uploading && setShowModal(false)} className="text-slate-400 hover:text-white transition-colors">
+              <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-white transition-colors">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -348,10 +382,9 @@ export const DocumentManager: React.FC = () => {
                 <button 
                   type="button" 
                   onClick={() => setShowModal(false)}
-                  disabled={uploading}
                   className="px-5 py-2.5 text-slate-400 hover:text-white transition-colors"
                 >
-                  Cancelar
+                  {uploading ? 'Fechar (Processando...)' : 'Cancelar'}
                 </button>
                 <button 
                   type="submit" 
