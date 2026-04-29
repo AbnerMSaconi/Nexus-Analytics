@@ -10,11 +10,11 @@ Abra um terminal na pasta raiz do projeto:
 
 ```bash
 # 1. Criar ambiente virtual
-python -m venv venv
+python -m venv env
 
 # 2. Ativar o ambiente virtual
 # No Windows:
-.\venv\Scripts\activate
+env\Scripts\activate
 
 # 3. Instalar dependências
 pip install -r requirements.txt
@@ -52,7 +52,7 @@ O sistema utiliza o modelo **Qwen 2.5 3B** (4.1B parâmetros).
 ### Terminal 1: Servidor de Embedding (Porta 8081)
 ```bash
 # Use o caminho completo da sua pasta de usuário
-llama-server -m C:\Users\andre\.cache\llama.cpp\qwen2.5-3b-instruct-q4_k_m.gguf --embedding --port 8081
+llama-server -m C:\Users\andre\.cache\llama.cpp\Qwen3-Embedding-0.6B-Q8_0.gguf --embedding --port 8081
 ```
 
 ### Terminal 2: Servidor LLM (Porta 8080)

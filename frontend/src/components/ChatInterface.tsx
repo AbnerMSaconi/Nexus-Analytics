@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Bot, User as UserIcon, BookOpen, Clock, Plus, Cpu, Trash2, ExternalLink } from 'lucide-react';
+import { Send, Bot, User as UserIcon, BookOpen, Clock, Plus, Cpu, Trash2, ExternalLink, Download } from 'lucide-react';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import { generateRAGResponse } from "../services/apiService";
@@ -99,13 +99,40 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ user }) => {
 
   const renderMarkdown = (content: string) => {
     try {
-      const html = marked.parse(content, { async: false }) as string;
+      // 1. Protege blocos de MathJax para que o marked não os corrompa
+      const mathBlocks: string[] = [];
+      const tempContent = content.replace(/(\$\$.*?\$\$|\$.*?\$|\\\[.*?\\\]|\\\(.*?\\\))/gs, (match) => {
+        mathBlocks.push(match);
+        return `@@MATHBLOCK${mathBlocks.length - 1}@@`;
+      });
+
+      // 2. Converte o Markdown para HTML
+      const html = marked.parse(tempContent, { async: false }) as string;
+
+      // 3. Sanitiza o HTML com os placeholders ainda neles (seguro)
       const cleanHtml = DOMPurify.sanitize(html);
-      return { __html: cleanHtml };
+
+      // 4. Restaura as fórmulas originais NO HTML LIMPO
+      // Isso evita que o DOMPurify delete fórmulas que usem < ou >
+      const finalHtml = cleanHtml.replace(/@@MATHBLOCK(\d+)@@/g, (_, id) => {
+        return mathBlocks[parseInt(id)];
+      });
+
+      return { __html: finalHtml };
     } catch (e) {
       return { __html: content };
     }
   };
+
+  // Efeito para re-processar MathJax sempre que as mensagens mudarem ou o processamento terminar
+  useEffect(() => {
+    if (window.MathJax && window.MathJax.typesetPromise) {
+      // Pequeno delay para garantir que o DOM foi atualizado pelo React
+      setTimeout(() => {
+        window.MathJax.typesetPromise().catch((err: any) => console.log('MathJax error:', err));
+      }, 100);
+    }
+  }, [sessions, isProcessing, currentSessionId]);
 
   // HANDLER PARA TECLA ENTER
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -271,9 +298,21 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ user }) => {
                 <Cpu className="w-5 h-5 text-blue-400" />
                 <span className="text-slate-200 font-medium">{currentSession?.title}</span>
               </div>
-              <div className="text-xs text-slate-500 flex items-center gap-1">
-                <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
-                RAG Engine Online
+              <div className="flex items-center gap-4">
+                {currentSession && currentSession.messages.length > 0 && (
+                  <button 
+                    onClick={() => StorageService.exportSessionToTxt(currentSession)}
+                    className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-blue-400 transition-colors bg-slate-800 px-2.5 py-1.5 rounded-md border border-slate-700"
+                    title="Exportar conversa"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">Exportar</span>
+                  </button>
+                )}
+                <div className="text-xs text-slate-500 flex items-center gap-1">
+                  <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+                  RAG Engine Online
+                </div>
               </div>
             </div>
 

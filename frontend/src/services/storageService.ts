@@ -47,6 +47,39 @@ export const StorageService = {
     }
   },
 
+  /**
+   * Exporta uma sessão de chat para arquivo de texto (.txt)
+   */
+  exportSessionToTxt(session: ChatSession) {
+    let content = `CONVERSA: ${session.title}\n`;
+    content += `DATA: ${new Date(session.updatedAt).toLocaleString('pt-BR')}\n`;
+    content += `========================================================\n\n`;
+
+    session.messages.forEach(msg => {
+      const role = msg.role === 'user' ? 'VOCÊ' : 'UCDB-IA';
+      const time = new Date(msg.timestamp).toLocaleTimeString('pt-BR');
+      content += `[${time}] ${role}:\n${msg.content}\n`;
+      
+      if (msg.citations && msg.citations.length > 0) {
+        content += `FONTES:\n`;
+        msg.citations.forEach(c => {
+          content += `- ${c.documentTitle}: ${c.snippet}\n`;
+        });
+      }
+      content += `\n--------------------------------------------------------\n\n`;
+    });
+
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `conversa_${session.title.replace(/\s+/g, '_').toLowerCase()}.txt`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  },
+
   // --- ATUALIZAÇÃO AQUI ---
   // Agora buscamos a estrutura rica (com títulos) do backend
   async getFolders(): Promise<Folder[]> {

@@ -1,7 +1,10 @@
 import os
 import json
 import re
+import asyncio
+from datetime import datetime
 from operator import itemgetter
+from app.utils.websocket_manager import manager
 from typing import List, Dict, Any
 
 # --- IMPORTS LANGCHAIN ---
@@ -19,7 +22,8 @@ except ImportError:
     print("!"*60 + "\n")
     raise
 
-from langchain_community.document_loaders import PyPDFLoader
+from langchain_community.document_loaders import PyPDFLoader, TextLoader, Docx2txtLoader
+import pdfplumber
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 # --- IMPORTS DO PROJETO ---
@@ -27,9 +31,41 @@ from app.utils.logger import logger
 from app.core.config import settings
 from app.core.embeddings import get_embeddings
 from app.core.llm import get_llm
-from quebrapdf import quebrar_pdf_por_capitulos
+from functools import lru_cache
+import collections
 
-_vectorstores_cache = {}
+# Cache com limite de tamanho para evitar estouro de memória (LRU básico)
+class VectorStoreCache:
+    def __init__(self, maxsize=5):
+        self.cache = collections.OrderedDict()
+        self.maxsize = maxsize
+
+    def get(self, key):
+        if key not in self.cache:
+            return None
+        self.cache.move_to_end(key)
+        return self.cache[key]
+
+    def set(self, key, value):
+        if key in self.cache:
+            self.cache.move_to_end(key)
+        self.cache[key] = value
+        if len(self.cache) > self.maxsize:
+            self.cache.popitem(last=False)
+            
+    def delete(self, key):
+        if key in self.cache:
+            del self.cache[key]
+
+_vs_cache = VectorStoreCache(maxsize=3) # Mantém apenas 3 áreas em RAM simultaneamente
+
+@lru_cache(maxsize=1)
+def get_cached_embeddings():
+    return get_embeddings()
+
+@lru_cache(maxsize=1)
+def get_cached_llm():
+    return get_llm()
 
 # ==============================================================================
 # 1. UTILITÁRIOS
@@ -45,6 +81,30 @@ def _normalizar_nome_area(nome_pasta: str) -> str:
     limpo = apenas_ascii.lower().strip().replace(" ", "_")
     return re.sub(r'[^a-z0-9_]', '', limpo)
 
+def _is_pdf_image_only(file_path: str) -> bool:
+    try:
+        with pdfplumber.open(file_path) as pdf:
+            text_content = ""
+            # Verifica as 3 primeiras páginas
+            for page in pdf.pages[:3]:
+                text = page.extract_text() or ""
+                text_content += text
+            
+            # Se tiver menos de 50 caracteres em 3 páginas, provavelmente é imagem
+            return len(text_content.strip()) < 50
+    except:
+        return False
+
+def _get_loader(file_path: str):
+    ext = os.path.splitext(file_path)[1].lower()
+    if ext == '.pdf':
+        return PyPDFLoader(file_path)
+    elif ext == '.docx':
+        return Docx2txtLoader(file_path)
+    elif ext == '.txt':
+        return TextLoader(file_path, encoding='utf-8')
+    return None
+
 def _carregar_manifesto(caminho_indice: str) -> dict:
     p = os.path.join(caminho_indice, "manifest.json")
     if os.path.exists(p):
@@ -59,6 +119,21 @@ def _salvar_manifesto(caminho_indice: str, dados: dict):
 
 def format_docs(docs):
     return "\n\n".join(f"[Fonte: {d.metadata.get('source', 'Doc')}] {d.page_content}" for d in docs)
+
+def _rerank_documents(question: str, docs: List[Any]) -> List[Any]:
+    """
+    Usa uma lógica simplificada para garantir que os documentos passados 
+    realmente tenham relação com a pergunta, evitando ruído.
+    """
+    if not docs: return []
+    
+    # Em uma implementação avançada, usaríamos um modelo de Cross-Encoder aqui.
+    # Como queremos manter leve, vamos apenas garantir que não passamos 
+    # documentos vazios ou excessivamente curtos que podem ser ruído de OCR.
+    filtered_docs = [d for d in docs if len(d.page_content.strip()) > 20]
+    
+    # Retorna os top K (ajustado se necessário)
+    return filtered_docs[:settings.RETRIEVAL_K]
 
 def _sanitizar_resposta(texto: str) -> str:
     if not texto: return ""
@@ -134,21 +209,24 @@ def atualizar_base_de_conhecimento():
     logger.info("🔪 Verificando se há arquivos gigantes para fatiar antes da indexação...")
     quebrar_pdf_por_capitulos(settings.pdf_path)
 
-    emb_model = get_embeddings()
+    emb_model = get_cached_embeddings()
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=settings.CHUNK_SIZE, chunk_overlap=settings.CHUNK_OVERLAP)
 
     itens = os.listdir(settings.pdf_path)
     areas = [d for d in itens if os.path.isdir(os.path.join(settings.pdf_path, d))]
-    if any(f.endswith('.pdf') for f in itens): areas.append("Geral")
+    
+    # Suporte a múltiplos formatos
+    formatos_suportados = ('.pdf', '.docx', '.txt')
+    if any(f.lower().endswith(formatos_suportados) for f in itens): areas.append("Geral")
 
     for nome_pasta in areas:
         area_key = _normalizar_nome_area(nome_pasta)
         origem = settings.pdf_path if nome_pasta == "Geral" else os.path.join(settings.pdf_path, nome_pasta)
         
         if nome_pasta == "Geral":
-            arquivos = [f for f in itens if f.endswith('.pdf')]
+            arquivos = [f for f in itens if f.lower().endswith(formatos_suportados)]
         else:
-            arquivos = [f for f in os.listdir(origem) if f.lower().endswith('.pdf')]
+            arquivos = [f for f in os.listdir(origem) if f.lower().endswith(formatos_suportados)]
 
         if not arquivos: continue
 
@@ -171,7 +249,8 @@ def atualizar_base_de_conhecimento():
         for i, arq in enumerate(pendentes, 1):
             try:
                 logger.info(f"🧠 [{i}/{len(pendentes)}] Analisando: {arq}")
-                loader = PyPDFLoader(os.path.join(origem, arq))
+                loader = _get_loader(os.path.join(origem, arq))
+                if not loader: continue
                 full_docs = loader.load() 
                 
                 amostra_titulo = full_docs[:3] 
@@ -191,7 +270,7 @@ def atualizar_base_de_conhecimento():
                     "status": "indexed",
                     "title": titulo_gerado,
                     "pages_indexed": len(full_docs),
-                    "last_updated": "now"
+                    "last_updated": datetime.now().isoformat()
                 }
                 
             except Exception as e:
@@ -218,7 +297,7 @@ def atualizar_base_de_conhecimento():
 # 3.1. INGESTÃO SELETIVA (APENAS UMA ÁREA E ARQUIVOS ESPECÍFICOS) - NOVO!
 # ==============================================================================
 
-def processar_area_especifica(area: str, caminhos_arquivos: List[str]):
+def processar_area_especifica(area: str, caminhos_arquivos: List[str], user_id: str = None):
     """
     Recebe os caminhos físicos dos arquivos recém-salvos e atualiza APENAS o 
     vectorstore e o manifesto correspondentes a essa área de conhecimento.
@@ -231,7 +310,7 @@ def processar_area_especifica(area: str, caminhos_arquivos: List[str]):
     if not os.path.exists(caminho_indice):
         os.makedirs(caminho_indice)
 
-    emb_model = get_embeddings()
+    emb_model = get_cached_embeddings()
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=settings.CHUNK_SIZE, chunk_overlap=settings.CHUNK_OVERLAP)
     
     manifesto = _carregar_manifesto(caminho_indice)
@@ -241,7 +320,18 @@ def processar_area_especifica(area: str, caminhos_arquivos: List[str]):
         nome_arquivo = os.path.basename(arq_path)
         try:
             logger.info(f"🧠 Analisando arquivo específico: {nome_arquivo}")
-            loader = PyPDFLoader(arq_path)
+            
+            # Verificação de PDF de Imagem
+            if arq_path.lower().endswith('.pdf') and _is_pdf_image_only(arq_path):
+                logger.warning(f"⚠️ O arquivo {nome_arquivo} parece ser apenas imagem (OCR necessário).")
+                if user_id:
+                    asyncio.run(manager.send_personal_message({
+                        "type": "processing_warning",
+                        "message": f"O arquivo '{nome_arquivo}' parece ser uma imagem digitalizada. A IA pode ter dificuldade em ler o conteúdo sem OCR."
+                    }, user_id))
+
+            loader = _get_loader(arq_path)
+            if not loader: continue
             full_docs = loader.load()
             
             if not full_docs:
@@ -268,7 +358,7 @@ def processar_area_especifica(area: str, caminhos_arquivos: List[str]):
                 "status": "indexed",
                 "title": titulo_gerado,
                 "pages_indexed": len(full_docs),
-                "last_updated": "now" 
+                "last_updated": datetime.now().isoformat() 
             }
             
         except Exception as e:
@@ -294,12 +384,23 @@ def processar_area_especifica(area: str, caminhos_arquivos: List[str]):
             logger.info(f"💾 Índice '{area_key}' atualizado/criado com sucesso via modal seletivo.")
             
             # Limpa o cache para forçar a recarga no próximo RAG
-            global _vectorstores_cache
-            if caminho_indice in _vectorstores_cache:
-                del _vectorstores_cache[caminho_indice]
+            _vs_cache.delete(caminho_indice)
+
+            # --- NOTIFICAÇÃO WEBSOCKET ---
+            if user_id:
+                asyncio.run(manager.send_personal_message({
+                    "type": "processing_complete",
+                    "area": area,
+                    "message": f"Vetorização de {len(caminhos_arquivos)} arquivos em '{area.capitalize()}' concluída!"
+                }, user_id))
                 
         except Exception as index_err:
             logger.error(f"❌ Erro crítico ao salvar índice FAISS na área específica: {index_err}")
+            if user_id:
+                asyncio.run(manager.send_personal_message({
+                    "type": "processing_error",
+                    "message": f"Erro ao processar arquivos em '{area}': {str(index_err)}"
+                }, user_id))
             raise index_err
 # ==============================================================================
 # 3.2. GERENCIADOR DE PERSONAS (PROMPTS DINÂMICOS)
@@ -336,9 +437,13 @@ Sua base de conhecimento são as normas técnicas, manuais e cálculos contidos 
 
 REGRAS DE RESPOSTA (ENGENHARIA):
 1. Forneça respostas diretas, estruturadas em passos lógicos ou tópicos.
-2. Baseie-se APENAS nos manuais, cálculos e normas (ex: ABNT) das tags.
-3. Se a pergunta envolver parâmetros de segurança ou fórmulas que não estão explícitas no documento, recuse a resposta informando: "Dados técnicos insuficientes nos documentos. Consulte a norma original."
-4. NUNCA invente medidas, fatores de segurança ou cálculos."""
+2. SEMPRE utilize fórmulas matemáticas com MathJax.
+   - Use APENAS $$ para blocos de fórmulas destacados (em linha própria). Ex: $$ FP = \frac{{P}}{{S}} $$
+   - Use APENAS $ para fórmulas no meio do texto. Ex: $ P = V \cdot I $
+   - PROIBIDO usar delimitadores como \[ \], \( \), [ ] ou ( ) para fórmulas.
+3. Baseie-se APENAS nos manuais, cálculos e normas (ex: ABNT) das tags.
+4. Se a pergunta envolver parâmetros de segurança ou fórmulas que não estão explícitas no documento, recuse a resposta informando: "Dados técnicos insuficientes nos documentos. Consulte a norma original."
+5. NUNCA invente medidas, fatores de segurança ou cálculos."""
 
     # 3. PERSONA: TECNOLOGIA E COMPUTAÇÃO
     elif "tecnologia" in area_normalizada or "computacao" in area_normalizada or "sistemas" in area_normalizada:
@@ -351,9 +456,11 @@ Utilize estritamente a documentação de software, arquitetura e trechos de cód
 
 REGRAS DE RESPOSTA (TECNOLOGIA):
 1. Baseie sua resposta na arquitetura e documentação fornecida nas tags.
-2. Se o usuário pedir para resolver um erro, forneça a solução documentada passo a passo.
-3. Se a tecnologia ou biblioteca mencionada não constar no contexto, avise: "Esta tecnologia não faz parte da documentação indexada atualmente."
-4. Mantenha um tom lógico, focado na resolução do problema e em boas práticas de código."""
+2. Utilize LaTeX para representar qualquer notação matemática, complexidade de algoritmos (Big O) ou lógica formal.
+   - Use $$ para blocos destacados e $ para inline.
+3. Se o usuário pedir para resolver um erro, forneça a solução documentada passo a passo.
+4. Se a tecnologia ou biblioteca mencionada não constar no contexto, avise: "Esta tecnologia não faz parte da documentação indexada atualmente."
+5. Mantenha um tom lógico, focado na resolução do problema e em boas práticas de código."""
 
     # 4. PERSONA: SAÚDE (Enfermagem, Fisio, Vet, etc)
     elif "saude" in area_normalizada or "medicina" in area_normalizada or "enfermagem" in area_normalizada or "veterinaria" in area_normalizada:
@@ -366,9 +473,11 @@ Sua base de conhecimento são estritamente os protocolos clínicos e artigos das
 
 REGRAS DE RESPOSTA (SAÚDE):
 1. Baseie-se APENAS nas diretrizes documentadas fornecidas.
-2. Você está PROIBIDO de prescrever tratamentos diagnósticos ou dar conselhos médicos diretos ao usuário como se fosse uma consulta.
-3. Trate a resposta de forma acadêmica e científica.
-4. Se a resposta não for encontrada, diga: "Não há diretriz clínica ou protocolo nos documentos fornecidos para esta condição." """
+2. Utilize LaTeX para representar qualquer notação técnica ou química.
+   - Use $$ para blocos destacados e $ para inline.
+3. Você está PROIBIDO de prescrever tratamentos diagnósticos ou dar conselhos médicos diretos ao usuário como se fosse uma consulta.
+4. Trate a resposta de forma acadêmica e científica.
+5. Se a resposta não for encontrada, diga: "Não há diretriz clínica ou protocolo nos documentos fornecidos para esta condição." """
 
     # 5. PERSONA: GERAL (Fallback para outras áreas)
     else:
@@ -381,17 +490,17 @@ Sua ÚNICA fonte de verdade são os textos contidos entre as tags <documentos>.
 
 REGRAS DE RESPOSTA:
 1. Responda à pergunta baseando-se EXCLUSIVAMENTE nas informações contidas nas tags.
-2. Seja claro, direto e educado.
-3. Se a informação não estiver clara ou não existir no texto, responda: "Não encontrei essa informação nos documentos disponibilizados."
-4. NUNCA invente dados ou utilize conhecimento externo."""
+2. Utilize LaTeX para representar qualquer fórmula matemática ou notação técnica.
+   - Use $$ para blocos destacados e $ para inline.
+3. Seja claro, direto e educado.
+4. Se a informação não estiver clara ou não existir no texto, responda: "Não encontrei essa informação nos documentos disponibilizados."
+5. NUNCA invente dados ou utilize conhecimento externo."""
 
 # ==============================================================================
 # 4. CHAT RAG
 # ==============================================================================
 
 def get_rag_chain(area: str = "Geral"):
-    global _vectorstores_cache
-    
     area_key = _normalizar_nome_area(area) if area else "geral"
     caminho_indice = os.path.join(settings.vectorstore_path, f"index_{area_key}")
     
@@ -400,14 +509,15 @@ def get_rag_chain(area: str = "Geral"):
         logger.error(f"Índice não encontrado para a área: {area_key}")
         return None
 
-    if caminho_indice not in _vectorstores_cache:
-        emb_model = get_embeddings()
-        _vectorstores_cache[caminho_indice] = FAISS.load_local(caminho_indice, emb_model, allow_dangerous_deserialization=True)
+    vectorstore = _vs_cache.get(caminho_indice)
+    if not vectorstore:
+        emb_model = get_cached_embeddings()
+        vectorstore = FAISS.load_local(caminho_indice, emb_model, allow_dangerous_deserialization=True)
+        _vs_cache.set(caminho_indice, vectorstore)
 
-    vectorstore = _vectorstores_cache[caminho_indice]
     retriever = vectorstore.as_retriever(search_kwargs={"k": settings.RETRIEVAL_K})
     
-    llm = get_llm().bind(stop=["Human:", "User:", "Question:", "System:", "<|im_end|>", "<|eot_id|>"])
+    llm = get_cached_llm().bind(stop=["Human:", "User:", "Question:", "System:", "<|im_end|>", "<|eot_id|>"])
 
     # === AQUI ESTÁ A MÁGICA DA PERSONA ===
     system_msg = _obter_prompt_persona(area)
@@ -420,7 +530,7 @@ def get_rag_chain(area: str = "Geral"):
     
     chain = (
         RunnableParallel({
-            "context": itemgetter("question") | retriever,
+            "context": itemgetter("question") | retriever | RunnableLambda(lambda docs: _rerank_documents("", docs)),
             "question": itemgetter("question"),
             "chat_history": itemgetter("chat_history"),
         })

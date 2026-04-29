@@ -5,7 +5,8 @@ from typing import List, Optional
 import json
 import os
 import logging
-from fastapi import UploadFile, File, Form
+from fastapi import UploadFile, File, Form, BackgroundTasks, WebSocket, WebSocketDisconnect
+from app.utils.websocket_manager import manager
 import shutil
 from pathlib import Path
 from quebrapdf import quebrar_arquivo_unico
@@ -183,9 +184,9 @@ async def get_knowledge_areas():
         return {"data": []}
 
 @router.post("/ingest")
-async def ingest_files(current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+async def ingest_files(background_tasks: BackgroundTasks, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
     """
-    Gatilho manual para processamento de documentos (Restrito).
+    Gatilho manual para processamento de documentos (Restrito) em segundo plano.
     """
     if current_user.role == "aluno":
         log_activity(db, current_user, "ACCESS_DENIED_INGEST", "WARNING", "Aluno tentou ingerir documentos.")
@@ -193,22 +194,29 @@ async def ingest_files(current_user: models.User = Depends(get_current_user), db
     
     log_activity(db, current_user, "INGEST_START", "INFO", "Usuario iniciou ingestao.")
     
-    try:
-        atualizar_base_de_conhecimento()
-        return {"status": "success", "message": "Ingestão concluída."}
-    except Exception as e:
-        logger.error(f"Erro na ingestão: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    background_tasks.add_task(atualizar_base_de_conhecimento)
+    return {"status": "processing", "message": "A ingestão global foi iniciada em segundo plano."}
     
+@router.websocket("/ws/{user_id}")
+async def websocket_endpoint(websocket: WebSocket, user_id: str):
+    await manager.connect(user_id, websocket)
+    try:
+        while True:
+            # Mantém a conexão aberta
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(user_id)
+
 @router.post("/admin/upload")
 async def upload_files_to_area(
+    background_tasks: BackgroundTasks,
     area: str = Form(...),
     files: List[UploadFile] = File(...),
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
-    Recebe arquivos, fatia automaticamente se tiverem sumário, e processa para a área específica.
+    Recebe arquivos, fatia automaticamente se tiverem sumário, e processa para a área específica em segundo plano.
     """
     # 1. Permissões
     if current_user.role not in ["administrador", "professor", "coordenador"]:
@@ -223,32 +231,37 @@ async def upload_files_to_area(
     
     # 3. Salva os arquivos e tenta fatiar
     for file in files:
-        file_path = base_dir / file.filename
+        filename = file.filename
+        ext = os.path.splitext(filename)[1].lower()
+        
+        if ext not in ['.pdf', '.docx', '.txt']:
+            logger.warning(f"Formato não suportado ignorado: {filename}")
+            continue
+
+        file_path = base_dir / filename
         
         # Salva o arquivo bruto no disco
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
             
-        # === A MÁGICA ACONTECE AQUI ===
-        # Passa o arquivo salvo pelo nosso fatiador inteligente
-        partes_geradas = quebrar_arquivo_unico(str(file_path))
-        
-        # Adiciona o resultado (seja 1 arquivo original ou 30 partes) à lista final
-        arquivos_finais_para_vetorizar.extend(partes_geradas)
+        if ext == '.pdf':
+            # === A MÁGICA ACONTECE APENAS PARA PDF ===
+            partes_geradas = quebrar_arquivo_unico(str(file_path))
+            arquivos_finais_para_vetorizar.extend(partes_geradas)
+        else:
+            # DOCX e TXT vão direto
+            arquivos_finais_para_vetorizar.append(str(file_path))
         
     log_activity(db, current_user, "FILE_UPLOAD", "INFO", f"Enviou {len(files)} arquivos e gerou {len(arquivos_finais_para_vetorizar)} partes na área {area}")
     
-    # 4. Chama o pipeline de vetorização específico com as partes menores
+    # 4. Chama o pipeline de vetorização específico em background (agora com user_id para notificação)
     from app.core.rag import processar_area_especifica 
-    try:
-        processar_area_especifica(area_clean, arquivos_finais_para_vetorizar)
-        return {
-            "status": "success", 
-            "message": f"{len(files)} arquivo(s) recebido(s), dividido(s) em {len(arquivos_finais_para_vetorizar)} parte(s) e vetorizado(s) em {area.capitalize()}."
-        }
-    except Exception as e:
-        logger.error(f"Erro na vetorização: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    background_tasks.add_task(processar_area_especifica, area_clean, arquivos_finais_para_vetorizar, str(current_user.id))
+    
+    return {
+        "status": "processing", 
+        "message": f"{len(files)} arquivo(s) recebido(s). O processamento de {len(arquivos_finais_para_vetorizar)} partes foi iniciado em segundo plano."
+    }
 # ==============================================================================
 # 4. CHAT E CONVERSAS (SECURE & ENCRYPTED)
 # ==============================================================================

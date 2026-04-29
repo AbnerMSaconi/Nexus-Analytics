@@ -175,7 +175,12 @@ export const DocumentManager: React.FC = () => {
                         <FileText className={`w-4 h-4 ${getFileIcon(doc.type)}`} />
                         <div>
                           <p className="text-sm font-medium text-slate-300">{doc.title}</p>
-                          <p className="text-[11px] text-slate-500 mt-0.5">Indexado em: {new Date(doc.uploadDate).toLocaleDateString()}</p>
+                          <p className="text-[11px] text-slate-500 mt-0.5">
+  Indexado em: {(() => {
+    const d = new Date(doc.uploadDate);
+    return isNaN(d.getTime()) ? 'Recém-adicionado' : d.toLocaleDateString();
+  })()}
+</p>
                         </div>
                       </div>
                     </div>
