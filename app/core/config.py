@@ -21,9 +21,9 @@ class Settings(BaseSettings):
     REPETITION_PENALTY: float = 1.05 # Llama 3.1 repete menos, penalidade leve
 
     # RAG - Otimizado para modelos locais (Qwen/Llama)
-    CHUNK_SIZE: int = 600      # Reduzido de 1200 para 600 para evitar erro de contexto
-    CHUNK_OVERLAP: int = 100    # Reduzido de 300 para 100
-    RETRIEVAL_K: int = 5        # Reduzido de 8 para 5 para economizar contexto no chat
+    CHUNK_SIZE: int = 1000     # Aumentado de 600 para 1000 para captar mais contexto
+    CHUNK_OVERLAP: int = 200    # Aumentado de 100 para 200 para não perder transições
+    RETRIEVAL_K: int = 10       # Aumentado de 5 para 10 para dar mais opções de busca à IA
 
     # CAMINHOS
     BASE_DIR: str = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

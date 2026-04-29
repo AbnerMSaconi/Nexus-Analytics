@@ -28,6 +28,11 @@ def start_service(name, port, cmd):
         logger.info(f"✅ {name} online na porta {port}.")
         return
     
+    # Em Docker, não tentamos iniciar processos em background (devem estar em containers separados)
+    if os.path.exists("/.dockerenv"):
+        logger.warning(f"⚠️ {name} offline na porta {port}. Verifique os containers {name}.")
+        return
+
     logger.warning(f"⚠️ {name} offline. Tentando iniciar automaticamente...")
     try:
         # Ajuste para rodar em background sem travar e sem pedir input

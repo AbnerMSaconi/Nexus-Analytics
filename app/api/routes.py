@@ -202,13 +202,14 @@ async def ingest_files(background_tasks: BackgroundTasks, current_user: models.U
     
 @router.websocket("/ws/{user_id}")
 async def websocket_endpoint(websocket: WebSocket, user_id: str):
+    logger.info(f"🔍 Tentativa de conexão WS recebida para user_id: {user_id}")
     await manager.connect(user_id, websocket)
     try:
         while True:
             # Mantém a conexão aberta
             await websocket.receive_text()
     except WebSocketDisconnect:
-        manager.disconnect(user_id)
+        await manager.disconnect(user_id, websocket)
 
 @router.post("/admin/upload")
 async def upload_files_to_area(

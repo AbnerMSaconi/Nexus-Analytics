@@ -18,10 +18,10 @@ RUN pip install --no-cache-dir faiss-cpu
 COPY . .
 
 # Criar diretórios necessários
-RUN mkdir -p pdfs embeddings static
+RUN mkdir -p pdfs embeddings static /root/.cache/llama.cpp
 
 # Expor a porta do FastAPI
 EXPOSE 8000
 
-# Comando para rodar com hot-reload
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+# Comando para rodar com hot-reload e suporte a websockets
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--ws", "websockets", "--proxy-headers"]
