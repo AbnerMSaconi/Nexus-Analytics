@@ -1,9 +1,13 @@
-from app.core.database import SessionLocal
+from app.core.database import SessionLocal, engine, Base
 from app.api.models import User
 from app.core.security import get_password_hash
 import uuid
 
 def create_initial_admin():
+    # Garante que as tabelas existam antes de criar o admin
+    print("Verificando/Criando tabelas no banco de dados...")
+    Base.metadata.create_all(bind=engine)
+    
     db = SessionLocal()
     try:
         # Usa o mesmo ID externo que você está tentando no Login

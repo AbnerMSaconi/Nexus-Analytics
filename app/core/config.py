@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     # CAMINHOS
     BASE_DIR: str = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     # Garanta que este caminho é onde você salvou o arquivo .gguf
-    MODELS_DIR: str = os.path.expanduser("~/.cache/llama.cpp")
+    MODELS_DIR: str = os.getenv("MODELS_DIR", os.path.expanduser("~/.cache/llama.cpp"))
     
     # MODELO DE EMBEDDING (Qwen 3B/4B)
     CMD_EMBEDDING: list = [

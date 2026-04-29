@@ -1,7 +1,7 @@
 import type { ChatSession, Folder, Document } from '../types';
 
 // Configuração centralizada da API (Padrão Vite)
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 export const StorageService = {
   /**

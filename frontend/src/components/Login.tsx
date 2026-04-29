@@ -18,7 +18,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const API_URL = 'http://127.0.0.1:8000';
+  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
   // Lógica de busca de usuário mantida
   const fetchUserAndLogin = async (token: string) => {

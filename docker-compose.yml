@@ -1,0 +1,91 @@
+services:
+  # Servidor de LLM (Chat)
+  llm-server:
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda
+    container_name: ucdb-llm-server
+    ports:
+      - "8080:8080"
+    volumes:
+      - C:/Users/andre/.cache/llama.cpp:/models
+    environment:
+      - CUDA_VISIBLE_DEVICES=0
+    command: >
+      -m /models/qwen2.5-3b-instruct-q4_k_m.gguf
+      --port 8080
+      -fa 1
+      -c 32768
+      -ngl 99
+      --host 0.0.0.0
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  # Servidor de Embedding (Busca)
+  embedding-server:
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda
+    container_name: ucdb-embedding-server
+    ports:
+      - "8081:8081"
+    volumes:
+      - C:/Users/andre/.cache/llama.cpp:/models # Certifique-se de que o modelo de embedding esteja na pasta correta
+    environment:
+      - CUDA_VISIBLE_DEVICES=0
+    command: >
+      -m /models/Qwen3-Embedding-0.6B-Q8_0.gguf
+      --embedding
+      --port 8081
+      --host 0.0.0.0
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  # Backend FastAPI
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: ucdb-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+      - ./pdfs:/app/pdfs
+      - ./embeddings:/app/embeddings
+      - ./static:/app/static
+    environment:
+      - SECRET_KEY=${SECRET_KEY:-chave_super_secreta_padrao}
+      - LLM_BASE_URL=http://llm-server:8080/v1
+      - EMBEDDING_API_URL=http://embedding-server:8081/embedding
+      - DATABASE_URL=sqlite:////app/ucdb_ia.db
+    depends_on:
+      - llm-server
+      - embedding-server
+
+  # Frontend React (Vite)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.frontend
+    container_name: ucdb-frontend
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      - VITE_API_URL=http://localhost:8000
+    depends_on:
+      - backend
+
+volumes:
+  pdfs:
+  embeddings:
+  static:
