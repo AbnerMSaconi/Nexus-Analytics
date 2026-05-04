@@ -43,6 +43,7 @@ export interface ChatSession {
 // --- Gestão de Documentos ---
 export interface Document {
   id: string;
+  filename: string;
   title: string;
   content: string;
   type: string;

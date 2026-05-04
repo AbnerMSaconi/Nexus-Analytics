@@ -95,6 +95,7 @@ export const StorageService = {
         name: item.area,
         documents: item.documents.map((doc: any) => ({
           id: doc.filename,
+          filename: doc.filename, // Adicionado para garantir que a exclusão funcione
           // Aqui usamos o título gerado pela IA. Se não tiver, usa o nome do arquivo.
           title: doc.title || doc.filename, 
           content: `Documento PDF com ${doc.pages} páginas processadas.`, // Descrição para preview

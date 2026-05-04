@@ -2,6 +2,7 @@ import os
 import json
 import re
 import asyncio
+from pathlib import Path
 from datetime import datetime
 from operator import itemgetter
 from app.utils.websocket_manager import manager
@@ -109,7 +110,7 @@ def _get_loader(file_path: str):
         return TextLoader(file_path, encoding='utf-8')
     return None
 
-def _carregar_manifesto(caminho_indice: str) -> dict:
+def carregar_manifesto(caminho_indice: str) -> dict:
     p = os.path.join(caminho_indice, "manifest.json")
     if os.path.exists(p):
         try:
@@ -117,12 +118,12 @@ def _carregar_manifesto(caminho_indice: str) -> dict:
         except: return {}
     return {}
 
-def _salvar_manifesto(caminho_indice: str, dados: dict):
+def salvar_manifesto(caminho_indice: str, dados: dict):
     with open(os.path.join(caminho_indice, "manifest.json"), "w", encoding="utf-8") as f:
         json.dump(dados, f, indent=4, ensure_ascii=False)
 
 def format_docs(docs):
-    return "\n\n".join(f"[Fonte: {d.metadata.get('source', 'Doc')}] {d.page_content}" for d in docs)
+    return "\n\n".join(f"[Fonte: {os.path.basename(d.metadata.get('source', 'Doc'))}] {d.page_content}" for d in docs)
 
 @monitor_perf("Reranking de Documentos")
 def _rerank_documents(question: str, docs: List[Any]) -> List[Any]:
@@ -130,40 +131,67 @@ def _rerank_documents(question: str, docs: List[Any]) -> List[Any]:
     Otimização de Reranking: Filtra e ordena documentos para garantir alta relevância.
     """
     if not docs: return []
-    
+
     # 1. Filtro básico de qualidade (menos agressivo: 20 chars)
     docs = [d for d in docs if len(d.page_content.strip()) > 20]
-    
+
     if not question: return docs[:settings.RETRIEVAL_K]
-    
-    # 2. Reranking por frequência de termos
-    words = set(re.findall(r'\w+', question.lower()))
-    
+
+    # 2. Reranking por frequência de termos (Melhorado)
+    # Filtramos palavras irrelevantes (stop words simples)
+    stop_words = {"a", "o", "de", "do", "da", "em", "um", "uma", "com", "no", "na", "para"}
+    words = set(re.findall(r'\w+', question.lower())) - stop_words
+
     scored_docs = []
     for d in docs:
         content_lower = d.page_content.lower()
-        # Conta ocorrências das palavras da pergunta
-        score = sum(2 for w in words if w in content_lower)
+        score = 0
+        
+        # Match de palavras individuais
+        for w in words:
+            if w in content_lower:
+                score += 5 # Aumentamos o peso do match de palavra
+                
+        # Bônus para bigramas (proximidade de termos)
+        # Se duas palavras da pergunta aparecem próximas, o score sobe muito
+        for w1 in words:
+            for w2 in words:
+                if w1 != w2 and f"{w1} {w2}" in content_lower:
+                    score += 10
+
         # Bônus se as palavras aparecerem no tópico/título
         topic = d.metadata.get("topic", "").lower()
-        score += sum(3 for w in words if w in topic)
+        for w in words:
+            if w in topic:
+                score += 3
+                
         scored_docs.append((score, d))
-    
+
     # Ordena pelo score e pega os top K
     scored_docs.sort(key=lambda x: x[0], reverse=True)
-    
-    # Retorna os documentos, priorizando os com score > 0, mas mantendo alguns originais se necessário
+
+    # Retorna os documentos que possuem ao menos algum match de palavra-chave
     final_docs = [d for score, d in scored_docs if score > 0]
-    if not final_docs: return docs[:settings.RETRIEVAL_K] # Fallback
     
+    # Se não houver nenhum match de palavra-chave, retornamos o top 4 do FAISS 
+    # (Aumentamos de 2 para 4 para dar mais chance ao modelo)
+    if not final_docs: 
+        logger.warning(f"Nenhum match de palavra-chave para a pergunta. Enviando top 4 do FAISS.")
+        return docs[:4] 
+
     return final_docs[:settings.RETRIEVAL_K]
 
 def _sanitizar_resposta(texto: str) -> str:
     if not texto: return ""
     # Remove prefixos de IA e limpa espaços
     texto_limpo = re.sub(r'^(System|Assistant|User|AI|Human|RAG|Resposta):\s*', '', texto, flags=re.IGNORECASE).strip()
-    return texto_limpo
 
+    # --- FIX: Remove a frase de "não encontrado" se houver uma resposta antes dela ---
+    fallback_pattern = r"Não encontrei informações suficientes nos documentos da área.*para responder a esta pergunta com precisão\."
+    if len(texto_limpo) > 150:
+        texto_limpo = re.sub(fallback_pattern, "", texto_limpo, flags=re.DOTALL | re.IGNORECASE).strip()
+
+    return texto_limpo
 # ==============================================================================
 # 2. GERADOR DE TÍTULOS (IA BLINDADA - ASYNC)
 # ==============================================================================
@@ -225,7 +253,7 @@ async def atualizar_base_de_conhecimento_async():
 
         caminho_indice = os.path.join(settings.vectorstore_path, f"index_{area_key}")
         os.makedirs(caminho_indice, exist_ok=True)
-        manifesto = _carregar_manifesto(caminho_indice)
+        manifesto = carregar_manifesto(caminho_indice)
         
         pendentes = [arq for arq in arquivos if arq not in manifesto or "title" not in manifesto[arq]]
         if not pendentes: continue
@@ -271,8 +299,73 @@ async def atualizar_base_de_conhecimento_async():
                     vs.save_local(caminho_indice)
 
             await asyncio.get_event_loop().run_in_executor(_io_executor, _save_faiss)
-            _salvar_manifesto(caminho_indice, manifesto)
+            salvar_manifesto(caminho_indice, manifesto)
             _vs_cache.delete(caminho_indice)
+
+import networkx as nx
+import pickle
+
+class LightweightGraphRAG:
+    """Gerencia relacionamentos entre entidades usando NetworkX (In-Memory)."""
+    def __init__(self, index_path: str):
+        self.index_path = index_path
+        self.graph_path = os.path.join(index_path, "graph.pkl")
+        self.graph = nx.Graph()
+        self._load()
+
+    def _load(self):
+        if os.path.exists(self.graph_path):
+            try:
+                with open(self.graph_path, "rb") as f:
+                    self.graph = pickle.load(f)
+            except: self.graph = nx.Graph()
+
+    def save(self):
+        with open(self.graph_path, "wb") as f:
+            pickle.dump(self.graph, f)
+
+    async def extract_entities_and_relations(self, text: str):
+        """Usa o LLM para extrair entidades e relações de um chunk."""
+        # Filtro de palavras-chave para candidatos (Economiza chamadas ao LLM)
+        amostra = text[:1500]
+        
+        system_instruction = """Você é um extrator de grafos de conhecimento acadêmico.
+        Sua tarefa é identificar Entidades (Conceitos, Modelos, Leis) e como elas se relacionam.
+        Responda APENAS no formato: Entidade1 | Relacao | Entidade2. Máximo 5 relações."""
+        
+        from app.core.llm import get_llm
+        llm = get_llm()
+        
+        try:
+            # Para ser performático, só extraímos se o texto for denso
+            if len(text.strip()) < 200: return
+            
+            # Chamada ao LLM para extração
+            response = await llm.ainvoke(f"{system_instruction}\n\nTexto: {amostra}")
+            content = response.content if hasattr(response, 'content') else str(response)
+            
+            for line in content.split("\n"):
+                if "|" in line:
+                    parts = [p.strip() for p in line.split("|")]
+                    if len(parts) == 3:
+                        self.add_relation(parts[0], parts[2], parts[1])
+        except Exception as e:
+            logger.error(f"Erro na extração de grafo: {e}")
+
+    def add_relation(self, u, v, relation_type="related"):
+        self.graph.add_edge(u, v, type=relation_type)
+
+    def get_context(self, entities: List[str], depth=1) -> str:
+        """Busca nós vizinhos para expandir o contexto."""
+        context_nodes = set()
+        for entity in entities:
+            if entity in self.graph:
+                context_nodes.add(entity)
+                neighbors = list(self.graph.neighbors(entity))
+                context_nodes.update(neighbors[:5]) # Limita vizinhos
+        
+        if not context_nodes: return ""
+        return "Relacionamentos encontrados: " + ", ".join(context_nodes)
 
 # ==============================================================================
 # 3.1. INGESTÃO SELETIVA (ASYNC)
@@ -280,20 +373,39 @@ async def atualizar_base_de_conhecimento_async():
 
 from langchain_core.documents import Document
 
+import fitz  # PyMuPDF
+
 def _carregar_pdf_eficiente(file_path: str) -> List[Document]:
-    """Lê o PDF página por página para economizar RAM."""
+    """Lê o PDF usando PyMuPDF (fitz) para alta performance."""
     docs = []
     try:
-        reader = PdfReader(file_path)
-        for i, page in enumerate(reader.pages):
-            text = page.extract_text()
+        doc = fitz.open(file_path)
+        for i, page in enumerate(doc):
+            text = page.get_text("text").strip()
             if text:
                 docs.append(Document(
                     page_content=text,
-                    metadata={"source": os.path.basename(file_path), "page": i + 1}
+                    metadata={
+                        "source": os.path.basename(file_path), 
+                        "page": i + 1,
+                        "total_pages": len(doc)
+                    }
                 ))
+        doc.close()
     except Exception as e:
-        logger.error(f"Erro ao ler PDF {file_path}: {e}")
+        logger.error(f"Erro ao ler PDF com PyMuPDF {file_path}: {e}")
+        # Fallback para pypdf se fitz falhar por algum motivo raro
+        try:
+            from pypdf import PdfReader
+            reader = PdfReader(file_path)
+            for i, page in enumerate(reader.pages):
+                text = page.extract_text()
+                if text:
+                    docs.append(Document(
+                        page_content=text,
+                        metadata={"source": os.path.basename(file_path), "page": i + 1}
+                    ))
+        except: pass
     return docs
 
 def _get_loader_data(file_path: str) -> List[Document]:
@@ -312,43 +424,56 @@ def _get_loader_data(file_path: str) -> List[Document]:
 @monitor_perf("Vetorização de Área")
 async def processar_area_especifica_async(area: str, caminhos_arquivos: List[str], user_id: str = None, force_reindex: bool = False):
     """
-    Versão OTIMIZADA E COMPLETA: 
-    1. Realiza a quebra inteligente (cortador) em background para não travar o sistema.
-    2. Lê os arquivos de forma eficiente página por página.
-    3. Mantém a organização por capítulos que o usuário solicitou.
+    Versão OTIMIZADA: 
+    - Sliding Window (Text Splitter com Overlap)
+    - PyMuPDF para extração ultra-rápida.
+    - GraphRAG (NetworkX) integrado para relacionamentos.
     """
-    logger.info(f"🔄 Iniciando processamento de {len(caminhos_arquivos)} arquivos para: {area}")
+    logger.info(f"🔄 Iniciando processamento otimizado para: {area}")
     
     area_key = _normalizar_nome_area(area)
     caminho_indice = os.path.join(settings.vectorstore_path, f"index_{area_key}")
     os.makedirs(caminho_indice, exist_ok=True)
 
     emb_model = get_cached_embeddings()
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=settings.CHUNK_SIZE, chunk_overlap=settings.CHUNK_OVERLAP)
-    manifesto = _carregar_manifesto(caminho_indice)
+    # SLIDING WINDOW: Chunk overlap garante continuidade do contexto
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=settings.CHUNK_SIZE, 
+        chunk_overlap=settings.CHUNK_OVERLAP,
+        separators=["\n\n", "\n", ".", " ", ""]
+    )
+    manifesto = carregar_manifesto(caminho_indice)
+    graph_manager = LightweightGraphRAG(caminho_indice)
     
     from quebrapdf import quebrar_arquivo_unico
     
     # 1. Primeiro, processamos a quebra dos arquivos se necessário (em background)
     arquivos_finais = []
-    for arq_path in caminhos_arquivos:
-        if arq_path.lower().endswith(".pdf"):
-            if user_id:
-                await manager.send_personal_message({
-                    "type": "processing_warning", 
-                    "message": f"Analisando capítulos de {os.path.basename(arq_path)}..."
-                }, user_id)
-            
-            logger.info(f"✂️ Verificando capítulos para: {os.path.basename(arq_path)}")
-            partes = await asyncio.get_event_loop().run_in_executor(_io_executor, lambda: quebrar_arquivo_unico(arq_path))
-            
-            # Se não gerou partes novas, usa o arquivo original
-            if not partes:
-                arquivos_finais.append(arq_path)
+    if caminhos_arquivos:
+        for arq_path in caminhos_arquivos:
+            if arq_path.lower().endswith(".pdf"):
+                if user_id:
+                    await manager.send_personal_message({
+                        "type": "processing_warning", 
+                        "message": f"Analisando capítulos de {os.path.basename(arq_path)}..."
+                    }, user_id)
+                
+                logger.info(f"✂️ Verificando capítulos para: {os.path.basename(arq_path)}")
+                partes = await asyncio.get_event_loop().run_in_executor(_io_executor, lambda: quebrar_arquivo_unico(arq_path))
+                
+                # Se não gerou partes novas, usa o arquivo original
+                if not partes:
+                    arquivos_finais.append(arq_path)
+                else:
+                    arquivos_finais.extend(partes)
             else:
-                arquivos_finais.extend(partes)
-        else:
-            arquivos_finais.append(arq_path)
+                arquivos_finais.append(arq_path)
+    else:
+        # Se caminhos_arquivos for None, carregamos todos da pasta física para reconstruir
+        area_safe = _normalizar_nome_area(area)
+        base_dir = Path(settings.pdf_path) / area_safe
+        if base_dir.exists():
+            arquivos_finais = [str(f) for f in base_dir.glob("*") if f.suffix.lower() in ['.pdf', '.docx', '.txt']]
 
     if user_id and len(arquivos_finais) > 5:
         await manager.send_personal_message({
@@ -405,8 +530,12 @@ async def processar_area_especifica_async(area: str, caminhos_arquivos: List[str
         del full_docs # Libera RAM
         
         if chunks:
-            logger.info(f"🚀 Enviando {len(chunks)} trechos para a GPU (Embedding)...")
+            logger.info(f"🚀 Enviando {len(chunks)} trechos para a GPU (Embedding & Graph)...")
             
+            # Extração de Grafos (GraphRAG) em paralelo leve
+            for chunk in chunks[:10]: # Limitamos aos primeiros chunks para não travar muito a ingestão
+                await graph_manager.extract_entities_and_relations(chunk.page_content)
+
             def _add_to_vs(vs, docs):
                 if vs:
                     vs.add_documents(docs)
@@ -425,11 +554,12 @@ async def processar_area_especifica_async(area: str, caminhos_arquivos: List[str
         else:
             logger.warning(f"⚠️ {nome_arquivo} gerou 0 trechos após divisão.")
 
-    # 4. Salva o índice final
+    # 4. Salva o índice final e o grafo
     if vectorstore:
-        logger.info(f"💾 Salvando índice final da área {area}...")
+        logger.info(f"💾 Salvando índice final e grafo da área {area}...")
         await asyncio.get_event_loop().run_in_executor(_io_executor, lambda: vectorstore.save_local(caminho_indice))
-        _salvar_manifesto(caminho_indice, manifesto)
+        graph_manager.save()
+        salvar_manifesto(caminho_indice, manifesto)
         _vs_cache.delete(caminho_indice)
         logger.info(f"🎉 Processamento concluído!")
 
@@ -444,31 +574,30 @@ async def processar_area_especifica_async(area: str, caminhos_arquivos: List[str
 
 def _obter_prompt_persona(area: str) -> str:
     """
-    Retorna um prompt unificado de alto nível focado em raciocínio acadêmico.
-    Elimina regras rígidas que causam alucinações (como forçar NBRs).
+    Retorna um prompt direto e objetivo focado em precisão técnica.
     """
-    return """Você é o Assistente Acadêmico Especialista da UCDB (Universidade Católica Dom Bosco).
-Sua missão é ajudar alunos e professores a interpretar e aplicar o conhecimento contido nos documentos oficiais fornecidos.
+    area_display = area.capitalize() if area else "Geral"
 
-ESTRUTURA DE PENSAMENTO OBRIGATÓRIA:
-Para cada resposta, você deve seguir este fluxo mental (interno ou explícito):
-1. ANÁLISE: Identifique o que foi perguntado e procure a base técnica nos documentos.
-2. FUNDAMENTAÇÃO: Localize a regra, lei, norma ou conceito exato.
-3. APLICAÇÃO: Explique como essa regra se aplica ao caso ou pergunta.
-4. CONCLUSÃO: Responda de forma clara e profissional.
+    return f"""Você é o Assistente Especialista da UCDB.
+Sua missão é responder perguntas de forma **direta, técnica e sem rodeios**, baseando-se apenas nos documentos fornecidos.
 
-<documentos>
-{context}
-</documentos>
+### 🛠️ REGRAS DE OURO:
+1. **Objetividade Máxima**: Vá direto ao ponto. Evite introduções longas ou conclusões repetitivas.
+2. **Fidelidade**: Use apenas o <contexto_oficial>. Se a informação não estiver lá, diga apenas: "Não encontrei informações suficientes na base de {area_display}."
+3. **Sem Citações no Texto**: Não escreva nomes de arquivos ou fontes no corpo da resposta.
+4. **Formatação Técnica**: 
+   - Use **negrito** para termos cruciais.
+   - Use listas (bullets) para clareza.
+   - **Matemática e Quóruns**: SEMPRE use LaTeX com `$` para frações e números técnicos. **Nunca** escreva "3/5", escreva obrigatoriamente `$\frac{3}{5}$`. 
+   - **Exemplo**: "O quórum é de $\frac{3}{5}$ dos membros."
 
-DIRETRIZES RÍGIDAS:
-1. FONTE ÚNICA: Baseie sua resposta EXCLUSIVAMENTE nos documentos fornecidos acima. 
-2. CITAÇÕES REAIS: Cite nomes de leis, artigos, normas (NBR) ou títulos de livros APENAS se eles aparecerem explicitamente no texto. NUNCA invente referências.
-3. ESTILO ACADÊMICO: Seja formal, didático e utilize termos técnicos adequados à área (Direito, Saúde, Engenharia, etc).
-4. NOTAÇÃO TÉCNICA: Use LaTeX para fórmulas ou termos químicos: $$ para blocos e $ para inline.
-5. SILÊNCIO SEGURO: Se o assunto não estiver nos documentos, responda: "Não encontrei informações sobre este tema nos materiais disponibilizados para o curso de [ÁREA]."
+---
 
-Sua resposta deve ser estruturada, lógica e focada na interpretação correta dos fatos apresentados."""
+<contexto_oficial>
+{{context}}
+</contexto_oficial>
+
+Responda agora de forma clara e concisa:"""
 
 # ==============================================================================
 # 5. RAG CHAIN ASYNC (OTIMIZADA PARA PERFORMANCE)
@@ -506,7 +635,7 @@ async def get_rag_chain_async(area: str = "Geral"):
         # Carrega o índice FAISS em uma thread para não travar o loop async
         try:
             vectorstore = await asyncio.get_event_loop().run_in_executor(
-                _io_executor, 
+                _io_executor,
                 lambda: FAISS.load_local(caminho_indice, emb_model, allow_dangerous_deserialization=True)
             )
             _vs_cache.set(caminho_indice, vectorstore)
@@ -514,7 +643,20 @@ async def get_rag_chain_async(area: str = "Geral"):
             logger.error(f"Erro ao carregar índice FAISS {area_key}: {e}")
             return None
 
-    retriever = vectorstore.as_retriever(search_kwargs={"k": settings.RETRIEVAL_K})
+    retriever = vectorstore.as_retriever(search_kwargs={"k": settings.RETRIEVAL_K * 2}) # Pega o dobro para reranking
+
+    # --- COMPONENTE GRAPHRAG (Lightweight) ---
+    graph_manager = LightweightGraphRAG(caminho_indice)
+
+    async def get_graph_context(input_data: dict) -> str:
+        question = input_data["question"]
+        # Extraímos entidades simples da pergunta (keywords)
+        keywords = re.findall(r'\b[A-Z][a-z]+\b|\b[A-Z]{2,}\b', question)
+        if not keywords:
+            keywords = question.split()[-3:]
+
+        graph_data = graph_manager.get_context(keywords)
+        return f"\n[RELAÇÕES ENCONTRADAS]: {graph_data}\n" if graph_data else ""
 
     # LLM Bindado com tokens de parada
     llm = get_cached_llm().bind(stop=["Human:", "User:", "Question:", "System:", "<|im_end|>", "<|eot_id|>"])
@@ -527,20 +669,25 @@ async def get_rag_chain_async(area: str = "Geral"):
         ("user", "{question}")
     ])
 
+    # LCEL Chain com suporte a Grafo + Vetores
     chain = (
         RunnableParallel({
-            "context": itemgetter("question") | retriever | RunnableLambda(lambda docs: _rerank_documents("", docs)),
+            "docs_raw": itemgetter("question") | retriever,
+            "graph_context": get_graph_context,
             "question": itemgetter("question"),
             "chat_history": itemgetter("chat_history"),
         })
+        .assign(docs=lambda x: _rerank_documents(x["question"], x["docs_raw"]))
         .assign(answer=(
-            RunnablePassthrough.assign(context=lambda x: format_docs(x["context"]))
+            RunnablePassthrough.assign(
+                context=lambda x: f"{x['graph_context']}\n{format_docs(x['docs'])}"
+            )
             | prompt
             | llm
             | StrOutputParser()
             | RunnableLambda(_sanitizar_resposta)
         ))
-        .pick(["answer", "context"])
+        .pick(["answer", "docs"])
     )
 
-    return chain | RunnableLambda(lambda x: {"answer": x["answer"], "source_documents": x["context"]})
+    return chain | RunnableLambda(lambda x: {"answer": x["answer"], "source_documents": x["docs"]})

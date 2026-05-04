@@ -1,6 +1,6 @@
 services:
-  # Servidor de LLM (Chat)
-  llm-server:
+  # Servidor de LLM (Chat) - OTIMIZADO (Limite 4GB)
+  llm:
     image: ghcr.io/ggml-org/llama.cpp:server-cuda
     container_name: ucdb-llm-server
     ports:
@@ -12,28 +12,28 @@ services:
     command: >
       -m /models/qwen2.5-3b-instruct-q4_k_m.gguf
       --port 8080
-      -fa 1
-      -c 8192
-      -ngl 99
       --host 0.0.0.0
-      --cache-ram 0
-      -np 1
+      -ngl 99
+      -c 16384
+      --parallel 1
     deploy:
       resources:
+        limits:
+          memory: 6GB
         reservations:
           devices:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
 
-  # Servidor de Embedding (Busca)
-  embedding-server:
+  # Servidor de Embedding (Busca) - OTIMIZADO (Limite 2GB)
+  embeddings:
     image: ghcr.io/ggml-org/llama.cpp:server-cuda
     container_name: ucdb-embedding-server
     ports:
       - "8081:8081"
     volumes:
-      - C:/Users/andre/.cache/llama.cpp:/models # Certifique-se de que o modelo de embedding esteja na pasta correta
+      - C:/Users/andre/.cache/llama.cpp:/models
     environment:
       - CUDA_VISIBLE_DEVICES=0
     command: >
@@ -42,16 +42,23 @@ services:
       --port 8081
       --host 0.0.0.0
       -ngl 99
-      --cache-ram 0
+      --parallel 1
+    healthcheck:
+      test: ["CMD", "printf", "GET /health HTTP/1.1\\nHost: localhost\\n\\n", ">", "/dev/tcp/localhost/8081"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     deploy:
       resources:
+        limits:
+          memory: 2GB
         reservations:
           devices:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
 
-  # Backend FastAPI
+  # Backend FastAPI - OTIMIZADO (Limite 1GB)
   backend:
     build:
       context: .
@@ -66,14 +73,18 @@ services:
       - ./static:/app/static
     environment:
       - SECRET_KEY=${SECRET_KEY:-chave_super_secreta_padrao}
-      - LLM_BASE_URL=http://llm-server:8080/v1
-      - EMBEDDING_API_URL=http://embedding-server:8081/embedding
+      - LLM_BASE_URL=http://llm:8080/v1
+      - EMBEDDING_API_URL=http://embeddings:8081/embedding
       - DATABASE_URL=sqlite:////app/ucdb_ia.db
     depends_on:
-      - llm-server
-      - embedding-server
+      - llm
+      - embeddings
+    deploy:
+      resources:
+        limits:
+          memory: 1GB
 
-  # Frontend React (Vite)
+  # Frontend React (Vite) - OTIMIZADO (Limite 512MB)
   frontend:
     build:
       context: ./frontend
@@ -88,6 +99,10 @@ services:
       - VITE_API_URL=http://localhost:8000
     depends_on:
       - backend
+    deploy:
+      resources:
+        limits:
+          memory: 512MB
 
 volumes:
   pdfs:

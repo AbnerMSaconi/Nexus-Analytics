@@ -1,13 +1,17 @@
 // frontend/src/components/DocumentManager.tsx
 import React, { useState, useEffect, useRef } from 'react';
-import { Folder, FileText, Upload, Search, Database, RefreshCw, AlertCircle, ChevronRight, X, FileUp } from 'lucide-react'; 
+import { Folder, FileText, Upload, Search, Database, RefreshCw, AlertCircle, ChevronRight, X, FileUp, Trash2 } from 'lucide-react'; 
 import { StorageService } from '../services/storageService';
 import type { Folder as FolderType } from '../types';
 import { api } from '../assets/api';
 
 export const DocumentManager: React.FC = () => {
   const user = React.useMemo(() => {
-    try { return JSON.parse(localStorage.getItem('nexus_user') || 'null'); } catch { return null; }
+    try { 
+      const u = localStorage.getItem('nexus_user');
+      if (!u) return null;
+      return JSON.parse(u); 
+    } catch { return null; }
   }, []);
   const canIngest = user && ['professor', 'coordenador', 'administrador', 'admin'].includes(user.role);
 
@@ -59,6 +63,35 @@ export const DocumentManager: React.FC = () => {
       case 'xlsx': return 'text-green-400';
       case 'docx': return 'text-blue-400';
       default: return 'text-slate-400';
+    }
+  };
+
+  // Funções de Exclusão
+  const handleDeleteDocument = async (area: string, filename: string) => {
+    const token = localStorage.getItem('nexus_token');
+    if (!token) return;
+
+    if (!confirm(`Tem certeza que deseja excluir o arquivo "${filename}"?`)) return;
+
+    try {
+      await api.deleteDocument(area, filename, token);
+      loadData();
+    } catch (error: any) {
+      alert(`Erro ao excluir: ${error.message}`);
+    }
+  };
+
+  const handleDeleteArea = async (area: string) => {
+    const token = localStorage.getItem('nexus_token');
+    if (!token) return;
+
+    if (!confirm(`CUIDADO: Isso excluirá a área "${area}" e TODOS os seus documentos. Continuar?`)) return;
+
+    try {
+      await api.deleteArea(area, token);
+      loadData();
+    } catch (error: any) {
+      alert(`Erro ao excluir área: ${error.message}`);
     }
   };
 
@@ -225,33 +258,54 @@ export const DocumentManager: React.FC = () => {
           return (
             <div key={folder.id} className="bg-slate-900/40 rounded-xl border border-slate-800 overflow-hidden transition-all duration-300">
               <div 
-                onClick={() => toggleFolder(folder.id)}
                 className="px-4 py-3 flex items-center gap-3 cursor-pointer hover:bg-slate-800/60 transition-colors select-none group"
               >
-                <ChevronRight className={`w-4 h-4 text-slate-500 transition-transform duration-200 group-hover:text-slate-300 ${isExpanded ? 'rotate-90 text-slate-300' : ''}`} />
-                <Folder className="w-5 h-5 text-yellow-500/80" />
-                <h3 className="font-semibold text-slate-200">{folder.name}</h3>
-                <span className="text-xs bg-slate-800/80 text-slate-400 px-2.5 py-1 rounded-full ml-auto border border-slate-700/50">
-                  {folder.documents.length} arquivos
-                </span>
+                <div onClick={() => toggleFolder(folder.id)} className="flex items-center gap-3 flex-1">
+                  <ChevronRight className={`w-4 h-4 text-slate-500 transition-transform duration-200 group-hover:text-slate-300 ${isExpanded ? 'rotate-90 text-slate-300' : ''}`} />
+                  <Folder className="w-5 h-5 text-yellow-500/80" />
+                  <h3 className="font-semibold text-slate-200">{folder.name}</h3>
+                  <span className="text-xs bg-slate-800/80 text-slate-400 px-2.5 py-1 rounded-full ml-auto border border-slate-700/50">
+                    {folder.documents.length} arquivos
+                  </span>
+                </div>
+                
+                {canIngest && (
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); handleDeleteArea(folder.name); }}
+                    className="p-2 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-all"
+                    title="Excluir Área"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                )}
               </div>
               
               {isExpanded && (
                 <div className="divide-y divide-slate-800/50 bg-slate-950/30 border-t border-slate-800/50">
                   {folder.documents.map(doc => (
-                    <div key={doc.id} className="p-4 hover:bg-slate-800/30 transition-colors cursor-default pl-12">
+                    <div key={doc.id} className="p-4 hover:bg-slate-800/30 transition-colors cursor-default pl-12 flex justify-between items-center group/item">
                       <div className="flex items-center gap-3">
                         <FileText className={`w-4 h-4 ${getFileIcon(doc.type)}`} />
                         <div>
                           <p className="text-sm font-medium text-slate-300">{doc.title}</p>
                           <p className="text-[11px] text-slate-500 mt-0.5">
-  Indexado em: {(() => {
-    const d = new Date(doc.uploadDate);
-    return isNaN(d.getTime()) ? 'Recém-adicionado' : d.toLocaleDateString();
-  })()}
-</p>
+                            Indexado em: {(() => {
+                              const d = new Date(doc.uploadDate);
+                              return isNaN(d.getTime()) ? 'Recém-adicionado' : d.toLocaleDateString();
+                            })()}
+                          </p>
                         </div>
                       </div>
+
+                      {canIngest && (
+                        <button 
+                          onClick={() => handleDeleteDocument(folder.name, doc.filename)}
+                          className="p-2 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg opacity-0 group-hover/item:opacity-100 transition-all"
+                          title="Excluir Arquivo"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
                     </div>
                   ))}
                   {folder.documents.length === 0 && (

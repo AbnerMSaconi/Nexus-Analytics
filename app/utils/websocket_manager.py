@@ -54,9 +54,11 @@ class ConnectionManager:
         to_remove = []
         payload = json.dumps(message)
         
-        for user_id, websockets in self.active_connections.items():
+        # Iterar sobre uma cópia dos itens para evitar RuntimeError se a lista mudar durante o loop
+        for user_id, websockets in list(self.active_connections.items()):
             disconnected_from_user = []
-            for websocket in websockets:
+            # Também iterar sobre uma cópia do set de websockets
+            for websocket in list(websockets):
                 try:
                     await websocket.send_text(payload)
                 except Exception as e:
@@ -64,7 +66,8 @@ class ConnectionManager:
                     disconnected_from_user.append(websocket)
             
             for ws in disconnected_from_user:
-                websockets.remove(ws)
+                if ws in websockets:
+                    websockets.remove(ws)
             
             if not websockets:
                 to_remove.append(user_id)

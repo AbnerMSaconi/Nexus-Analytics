@@ -70,3 +70,6 @@ bcrypt==4.2.0
 python-multipart==0.0.9
 itsdangerous==2.2.0
 websockets==14.2
+pymupdf
+networkx
+faiss-cpu

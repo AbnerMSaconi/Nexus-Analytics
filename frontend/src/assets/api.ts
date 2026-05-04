@@ -128,6 +128,28 @@ export const api = {
       throw new Error(err.detail || 'Falha ao fazer upload e processar os arquivos.');
     }
     return res.json();
+  },
+  async deleteDocument(area: string, filename: string, token: string) {
+    const res = await fetch(`${API_URL}/admin/documents?area=${encodeURIComponent(area)}&filename=${encodeURIComponent(filename)}`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Falha ao excluir documento');
+    }
+    return res.json();
+  },
+  async deleteArea(area: string, token: string) {
+    const res = await fetch(`${API_URL}/admin/areas/${encodeURIComponent(area)}`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Falha ao excluir área');
+    }
+    return res.json();
   }
 };
     

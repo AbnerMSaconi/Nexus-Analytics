@@ -112,19 +112,19 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ user }) => {
     try {
       // 1. Protege blocos de MathJax para que o marked não os corrompa
       const mathBlocks: string[] = [];
-      const tempContent = content.replace(/(\$\$.*?\$\$|\$.*?\$|\\\[.*?\\\]|\\\(.*?\\\))/gs, (match) => {
+      // Regex melhorada para capturar $...$ e $$...$$
+      const tempContent = content.replace(/(\$\$.*?\$\$|\$.*?\$)/gs, (match) => {
         mathBlocks.push(match);
         return `@@MATHBLOCK${mathBlocks.length - 1}@@`;
       });
 
-      // 2. Converte o Markdown para HTML
+      // 2. Converte o Markdown para HTML (marked)
       const html = marked.parse(tempContent, { async: false }) as string;
 
-      // 3. Sanitiza o HTML com os placeholders ainda neles (seguro)
+      // 3. Sanitiza o HTML
       const cleanHtml = DOMPurify.sanitize(html);
 
-      // 4. Restaura as fórmulas originais NO HTML LIMPO
-      // Isso evita que o DOMPurify delete fórmulas que usem < ou >
+      // 4. Restaura as fórmulas originais
       const finalHtml = cleanHtml.replace(/@@MATHBLOCK(\d+)@@/g, (_, id) => {
         return mathBlocks[parseInt(id)];
       });
@@ -135,13 +135,13 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ user }) => {
     }
   };
 
-  // Efeito para re-processar MathJax sempre que as mensagens mudarem ou o processamento terminar
+  // Efeito para re-processar MathJax sempre que as mensagens mudarem
   useEffect(() => {
     if (window.MathJax && window.MathJax.typesetPromise) {
-      // Pequeno delay para garantir que o DOM foi atualizado pelo React
-      setTimeout(() => {
-        window.MathJax.typesetPromise().catch((err: any) => console.log('MathJax error:', err));
-      }, 100);
+      // Usamos requestAnimationFrame para garantir que o React já pintou o HTML no DOM
+      requestAnimationFrame(() => {
+        window.MathJax.typesetPromise().catch((err: any) => console.error('MathJax error:', err));
+      });
     }
   }, [sessions, isProcessing, currentSessionId]);
 
@@ -349,7 +349,17 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ user }) => {
                       }`}>
                         {msg.role === 'assistant' ? (
                           <div 
-                            className="prose prose-invert prose-sm max-w-none [&>p]:mb-2 [&>ul]:list-disc [&>ul]:pl-4 [&>ol]:list-decimal [&>ol]:pl-4 [&>pre]:bg-slate-950 [&>pre]:p-2 [&>pre]:rounded [&>code]:bg-slate-800 [&>code]:px-1 [&>code]:rounded"
+                            className="prose prose-invert prose-sm max-w-none 
+                              [&>p]:mb-3 [&>p]:leading-relaxed
+                              [&>h1]:text-2xl [&>h1]:font-black [&>h1]:text-white [&>h1]:mb-2 [&>h1]:flex [&>h1]:items-center [&>h1]:gap-2
+                              [&>h2]:text-xl [&>h2]:font-bold [&>h2]:text-blue-400 [&>h2]:mb-3 [&>h2]:mt-6
+                              [&>h3]:text-lg [&>h3]:font-bold [&>h3]:text-blue-500 [&>h3]:mb-2 [&>h3]:mt-4 [&>h3]:flex [&>h3]:items-center [&>h3]:gap-2
+                              [&>hr]:border-slate-800 [&>hr]:my-4
+                              [&>p]:mb-3 [&>p]:leading-relaxed [&>p]:text-slate-300
+                              [&>ul]:list-disc [&>ul]:pl-5 [&>ul]:mb-4
+                              [&>ol]:list-decimal [&>ol]:pl-5 [&>ol]:mb-4
+                              [&>pre]:bg-slate-950 [&>pre]:p-4 [&>pre]:rounded-lg [&>pre]:border [&>pre]:border-slate-800 [&>pre]:mb-4
+                              [&>code]:bg-slate-800 [&>code]:px-1.5 [&>code]:py-0.5 [&>code]:rounded [&>code]:text-blue-300 [&>code]:text-xs"
                             dangerouslySetInnerHTML={renderMarkdown(msg.content)} 
                           />
                         ) : (

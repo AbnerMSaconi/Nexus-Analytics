@@ -14,8 +14,9 @@ _emb_client = httpx.AsyncClient(
 
 class LlamaEmbeddings(Embeddings):
     def __init__(self, api_url: Any):
-        self.api_url = str(api_url) # Garante que seja string para evitar erro de Pydantic/Httpx
-        self.dimension = 1536 # Default inicial, será atualizado no primeiro sucesso
+        self.api_url = str(api_url).strip() # Remove espaços acidentais
+        self.dimension = 1536 # Default inicial
+        logger.info(f"🧬 LlamaEmbeddings configurado para: {self.api_url}")
 
     async def _get_single_embedding_async(self, client: httpx.AsyncClient, text: str) -> List[float]:
         max_retries = 3

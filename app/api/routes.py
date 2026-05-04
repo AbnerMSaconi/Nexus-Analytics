@@ -15,7 +15,7 @@ from quebrapdf import quebrar_arquivo_unico
 from app.api import schemas, models
 from app.core import security
 from app.core.database import get_db, SessionLocal
-from app.core.rag import get_rag_chain_async, atualizar_base_de_conhecimento_async
+from app.core.rag import get_rag_chain_async, atualizar_base_de_conhecimento_async, carregar_manifesto, salvar_manifesto, processar_area_especifica_async
 from app.core.config import settings
 from app.core.security import get_current_user, encrypt_message, decrypt_message
 from app.utils.performance import PerformanceMonitor
@@ -77,11 +77,13 @@ async def signup(user_in: schemas.UserCreate, db: Session = Depends(get_db)):
     
     hashed_pw = security.get_password_hash(user_in.password)
     
+    # FORÇADO: Por segurança, novos cadastros via API externa são sempre ALUNOS.
+    # Promoção para Admin deve ser feita via script de terminal.
     new_user = models.User(
         external_id=user_in.external_id,
         full_name=user_in.full_name,
         password_hash=hashed_pw,
-        role=user_in.role,
+        role="ALUNO", 
         course=user_in.course
     )
     
@@ -226,16 +228,17 @@ async def upload_files_to_area(
     if current_user.role not in ["administrador", "professor", "coordenador"]:
         raise HTTPException(status_code=403, detail="Sem permissão para upload.")
 
-    # 2. Sanitiza o nome da área
-    area_clean = area.lower().strip().replace(" ", "_")
-    base_dir = Path(settings.pdf_path) / area_clean
+    # 2. Sanitiza o nome da área (Path Traversal Protection)
+    area_safe = os.path.basename(area.lower().strip().replace(" ", "_"))
+    base_dir = Path(settings.pdf_path) / area_safe
     base_dir.mkdir(parents=True, exist_ok=True)
     
     arquivos_finais_para_vetorizar = []
     
     # 3. Salva os arquivos e tenta fatiar
     for file in files:
-        filename = file.filename
+        # Sanitização do Nome do Arquivo (Security Fix)
+        filename = os.path.basename(file.filename)
         ext = os.path.splitext(filename)[1].lower()
         
         if ext not in ['.pdf', '.docx', '.txt']:
@@ -250,16 +253,81 @@ async def upload_files_to_area(
             
         arquivos_finais_para_vetorizar.append(str(file_path))
         
-    log_activity(db, current_user, "FILE_UPLOAD", "INFO", f"Enviou {len(files)} arquivos na área {area}")
+    log_activity(db, current_user, "FILE_UPLOAD", "INFO", f"Enviou {len(files)} arquivos na área {area_safe}")
     
-    # 4. Chama o pipeline de vetorização em background (A quebra de PDF agora acontece aqui dentro)
+    # 4. Chama o pipeline de vetorização em background
     from app.core.rag import processar_area_especifica_async
-    background_tasks.add_task(processar_area_especifica_async, area_clean, arquivos_finais_para_vetorizar, str(current_user.id), True)
+    background_tasks.add_task(processar_area_especifica_async, area_safe, arquivos_finais_para_vetorizar, str(current_user.id), True)
     
     return {
         "status": "processing", 
-        "message": f"{len(files)} arquivo(s) recebido(s). O processamento de {len(arquivos_finais_para_vetorizar)} partes foi iniciado em segundo plano."
+        "message": f"{len(arquivos_finais_para_vetorizar)} arquivos foram recebidos e estão sendo processados na área {area_safe}.",
+        "area": area_safe
     }
+
+@router.delete("/admin/documents")
+async def delete_document(
+    area: str,
+    filename: str,
+    background_tasks: BackgroundTasks,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Exclui um arquivo específico e remove do índice FAISS (reindexação necessária para sumir do chat)."""
+    if current_user.role not in ["administrador", "professor", "coordenador"]:
+        raise HTTPException(status_code=403, detail="Sem permissão.")
+
+    area_safe = os.path.basename(area.lower().strip().replace(" ", "_"))
+    filename_safe = os.path.basename(filename)
+
+    if filename_safe == "undefined":
+        raise HTTPException(status_code=400, detail="Nome de arquivo inválido (undefined).")
+
+    # 1. Remove o arquivo físico
+    file_path = Path(settings.pdf_path) / area_safe / filename_safe
+    if not file_path.exists():
+        logger.warning(f"Tentativa de excluir arquivo inexistente: {file_path}")
+        # Mesmo se o arquivo não existir, prosseguimos para limpar o manifesto e o índice caso haja sujeira
+    else:
+        os.remove(file_path)
+    # 2. Remove do manifesto
+    caminho_indice = Path(settings.vectorstore_path) / f"index_{area_safe}"
+    manifesto = carregar_manifesto(str(caminho_indice))
+    if filename_safe in manifesto:
+        del manifesto[filename_safe]
+        salvar_manifesto(str(caminho_indice), manifesto)
+    
+    # 3. Dispara a limpeza total (Rebuild do índice daquela área)
+    # Isso garante que os embeddings do arquivo deletado sumam do FAISS
+    background_tasks.add_task(processar_area_especifica_async, area, None, str(current_user.id), True)
+        
+    log_activity(db, current_user, "FILE_DELETE", "WARNING", f"Excluiu {filename_safe} da área {area_safe}")
+    return {"status": "success", "message": f"Arquivo {filename_safe} excluído. O índice está sendo reconstruído para remover os dados permanentemente."}
+
+@router.delete("/admin/areas/{area}")
+async def delete_area(
+    area: str,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Exclui uma área inteira (Arquivos + Índices)."""
+    if current_user.role not in ["administrador", "professor", "coordenador"]:
+        raise HTTPException(status_code=403, detail="Sem permissão.")
+
+    area_safe = os.path.basename(area.lower().strip().replace(" ", "_"))
+    
+    # 1. Deleta arquivos PDF
+    pdf_dir = Path(settings.pdf_path) / area_safe
+    if pdf_dir.exists():
+        shutil.rmtree(pdf_dir)
+        
+    # 2. Deleta índices FAISS
+    index_dir = Path(settings.vectorstore_path) / f"index_{area_safe}"
+    if index_dir.exists():
+        shutil.rmtree(index_dir)
+        
+    log_activity(db, current_user, "AREA_DELETE", "CRITICAL", f"Excluiu a área inteira: {area_safe}")
+    return {"status": "success", "message": f"Área {area_safe} e todos os seus documentos foram excluídos."}
 # ==============================================================================
 # 4. CHAT E CONVERSAS (SECURE & ENCRYPTED)
 # ==============================================================================
@@ -330,6 +398,19 @@ async def chat(request: Request, body: schemas.ChatRequest, db: Session = Depend
             return StreamingResponse(iter([f'data: {json.dumps({"type": "error", "content": msg})}\n\n']))
 
     log_activity(db, current_user, "CHAT_START", "INFO", f"Chat na area {body.area}")
+
+    # 1. Proteção contra Prompt Injection (Básico)
+    forbidden_patterns = [
+        "ignore todas as instruções anteriores", 
+        "ignore previous instructions",
+        "você agora é um", "you are now a",
+        "system prompt", "instrução do sistema"
+    ]
+    message_lower = body.message.lower()
+    if any(p in message_lower for p in forbidden_patterns):
+        log_activity(db, current_user, "PROMPT_INJECTION_ATTEMPT", "CRITICAL", f"Usuário enviou prompt suspeito: {body.message[:100]}")
+        msg = "Desculpe, detectamos uma tentativa de manipulação de prompt. Sua atividade foi registrada para auditoria."
+        return StreamingResponse(iter([f'data: {json.dumps({"type": "error", "content": msg})}\n\n']))
 
     from app.core.rag import get_rag_chain_async
     rag_chain = await get_rag_chain_async(body.area)

@@ -1,60 +1,36 @@
 from pydantic_settings import SettingsConfigDict, BaseSettings
 from pydantic import AnyHttpUrl
 import os
-import secrets
 
 class Settings(BaseSettings):
     # API
-    APP_NAME: str = "UCDB Chat"
+    APP_NAME: str = "UCDB-IA Platform"
     API_V1_STR: str = "/api/v1"
     DEBUG: bool = False
-    SECRET_KEY: str = os.getenv("SECRET_KEY", "chave_super_secreta_padrao_para_desenvolvimento_troque_em_prod")
+    SECRET_KEY: str = os.getenv("SECRET_KEY", "chave_super_secreta_padrao_para_desenvolvimento")
 
-    # SERVIÇOS
+    # SERVIÇOS (vLLM & Llama.cpp)
     LLM_BASE_URL: AnyHttpUrl = "http://localhost:8080/v1"
     EMBEDDING_API_URL: AnyHttpUrl = "http://localhost:8081/embedding"
+    MODEL_NAME: str = os.getenv("MODEL_NAME", "qwen2.5-3b-instruct")
     
-    # PARAMETROS DO MODELO (Hermes 3)
+    # PARÂMETROS DO MODELO
     MAX_TOKENS: int = 8192      
-    TEMPERATURE: float = 0.0   # Hermes é criativo, 0.3 segura alucinações
+    TEMPERATURE: float = 0.0
     TOP_P: float = 0.90
-    REPETITION_PENALTY: float = 1.05 # Llama 3.1 repete menos, penalidade leve
+    REPETITION_PENALTY: float = 1.05
 
-    # RAG - Otimizado para modelos locais (Qwen/Llama)
-    CHUNK_SIZE: int = 1000     # Aumentado de 600 para 1000 para captar mais contexto
-    CHUNK_OVERLAP: int = 200    # Aumentado de 100 para 200 para não perder transições
-    RETRIEVAL_K: int = 10       # Aumentado de 5 para 10 para dar mais opções de busca à IA
+    # RAG - OTIMIZADO (Sliding Window & Higher Context)
+    CHUNK_SIZE: int = 700      # Reduzido para ser mais específico
+    CHUNK_OVERLAP: int = 300    # Aumentado para não perder contexto entre chunks
+    RETRIEVAL_K: int = 15       # Aumentado para buscar mais trechos candidatos
 
     # CAMINHOS
     BASE_DIR: str = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    # Garanta que este caminho é onde você salvou o arquivo .gguf
     MODELS_DIR: str = os.getenv("MODELS_DIR", os.path.expanduser("~/.cache/llama.cpp"))
     
-    # MODELO DE EMBEDDING (Qwen 3B/4B)
-    CMD_EMBEDDING: list = [
-        "llama-server", "-m", "qwen2.5-3b-instruct-q4_k_m.gguf",
-        "--embedding", "--port", "8081"
-    ]
-
-    # PARÂMETROS DE ESCALABILIDADE (Ajustados para Hardware Local)
-    # ATENÇÃO: Cada slot (-np) reserva memória (KV Cache). 
-    # Valores seguros para 6GB de VRAM: -np 1.
-    LLM_PARALLEL: int = os.getenv("LLM_PARALLEL", 1) 
-    
-    # MODELO LLM (Qwen 3B/4B Instruct)
-    @property
-    def CMD_LLM(self) -> list:
-        return [
-            "llama-server", 
-            "-m", "qwen2.5-3b-instruct-q4_k_m.gguf", 
-            "--port", "8080", 
-            "-fa", "1",           # Flash Attention
-            "-c", "8192",         # Contexto reduzido de 32k para 8k (Estabilidade)
-            "-ngl", "99",         # Máximo de camadas na GPU
-            "-np", str(self.LLM_PARALLEL), # Slots paralelos seguros
-            "--cont-batching",    # Continuous Batching
-            "-cb"
-        ]
+    # PARÂMETROS DE ESCALABILIDADE
+    LLM_PARALLEL: int = os.getenv("LLM_PARALLEL", 4) # vLLM lida com concorrência nativamente
     
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=False, extra="ignore")
 
