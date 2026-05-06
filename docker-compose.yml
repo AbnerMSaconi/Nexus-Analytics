@@ -6,7 +6,7 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - C:/Users/andre/.cache/llama.cpp:/models
+      - C:/Users/andre/.cache/llama.cpp:/models # Mapeia o cache local para o diretório de modelos do container
     environment:
       - CUDA_VISIBLE_DEVICES=0
     command: >
@@ -33,7 +33,7 @@ services:
     ports:
       - "8081:8081"
     volumes:
-      - C:/Users/andre/.cache/llama.cpp:/models
+      - C:/Users/andre/.cache/llama.cpp:/models # Mapeia o cache local para o diretório de modelos do container
     environment:
       - CUDA_VISIBLE_DEVICES=0
     command: >

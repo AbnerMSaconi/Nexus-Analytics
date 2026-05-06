@@ -82,8 +82,12 @@ const UserRow = ({ user, token, onUpdate, onEditClick }: { user: any, token: str
       
       <td className="p-4">
         <div className="flex items-center justify-end gap-2">
-            {user.is_blocked && (
-                <button onClick={async () => { await api.unblockUser(user.id, token); onUpdate(); }} className="flex items-center text-xs bg-red-600 hover:bg-red-500 text-white px-2 py-1.5 rounded transition-colors" title="Desbloquear">
+            {(user.is_blocked || user.failed_attempts > 0) && (
+                <button 
+                  onClick={async () => { await api.unblockUser(user.id, token); onUpdate(); }} 
+                  className={`flex items-center text-xs ${user.is_blocked ? 'bg-red-600 hover:bg-red-500' : 'bg-yellow-600 hover:bg-yellow-500'} text-white px-2 py-1.5 rounded transition-colors`} 
+                  title={user.is_blocked ? "Desbloquear" : "Limpar Falhas"}
+                >
                     <Unlock className="w-3 h-3" />
                 </button>
             )}
@@ -114,11 +118,17 @@ const UserRow = ({ user, token, onUpdate, onEditClick }: { user: any, token: str
 // COMPONENTE PRINCIPAL
 export const AdminPanel: React.FC = () => {
   const [users, setUsers] = useState<any[]>([]);
-  const [editingUser, setEditingUser] = useState<any>(null); // Estado para controlar o modal de edição
-  const [formData, setFormData] = useState({ full_name: '', external_id: '', role: '', course: '', password: '' });
+  const [editingUser, setEditingUser] = useState<any>(null); // null quando criando novo, objeto quando editando
+  const [isModalOpen, setIsModalOpen] = useState(false); // Novo estado para controlar abertura do modal
+  const [formData, setFormData] = useState({ full_name: '', external_id: '', role: 'aluno', course: '', password: '' });
   const [loadingForm, setLoadingForm] = useState(false);
 
   const token = localStorage.getItem('nexus_token') || '';
+
+  // Pega dados do usuário logado
+  const currentUserStr = localStorage.getItem('nexus_user');
+  const currentUser = currentUserStr ? JSON.parse(currentUserStr) : null;
+  const isCoord = currentUser?.role === 'coordenador';
 
   const loadUsers = async () => {
     try {
@@ -129,36 +139,61 @@ export const AdminPanel: React.FC = () => {
 
   useEffect(() => { loadUsers(); }, []);
 
-  // Abre o modal preenchendo os dados do usuário
+  // Abre o modal para criação
+  const handleOpenCreate = () => {
+    setFormData({
+      full_name: '',
+      external_id: '',
+      role: 'aluno',
+      course: '',
+      password: ''
+    });
+    setEditingUser(null);
+    setIsModalOpen(true);
+  };
+
+  // Abre o modal preenchendo os dados do usuário para edição
   const handleOpenEdit = (user: any) => {
     setFormData({
       full_name: user.full_name || '',
       external_id: user.external_id || '',
       role: user.role || 'aluno',
       course: user.course || '',
-      password: '' // Senha começa vazia
+      password: '' // Senha começa vazia na edição
     });
     setEditingUser(user);
+    setIsModalOpen(true);
   };
 
-  // Envia os dados atualizados para o backend
-  const handleSaveEdit = async (e: React.FormEvent) => {
+  // Envia os dados para o backend (Criação ou Edição)
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoadingForm(true);
     
     try {
-      // Monta os dados, ignorando a senha se ela estiver em branco
-      const dataToUpdate: any = { ...formData };
-      if (!dataToUpdate.password) {
-        delete dataToUpdate.password;
+      if (editingUser) {
+        // EDIÇÃO
+        const dataToUpdate: any = { ...formData };
+        if (!dataToUpdate.password) {
+          delete dataToUpdate.password;
+        }
+        await api.updateUserDetails(editingUser.id, dataToUpdate, token);
+        alert("Usuário atualizado com sucesso!");
+      } else {
+        // CRIAÇÃO
+        if (!formData.password) {
+          alert("A senha é obrigatória para novos usuários.");
+          setLoadingForm(false);
+          return;
+        }
+        await api.createUser(formData, token);
+        alert("Usuário criado com sucesso!");
       }
 
-      await api.updateUserDetails(editingUser.id, dataToUpdate, token);
-      alert("Usuário atualizado com sucesso!");
-      setEditingUser(null); // Fecha o modal
+      setIsModalOpen(false);
       loadUsers(); // Recarrega a tabela
     } catch (error: any) {
-      alert(error.message || "Erro ao atualizar usuário");
+      alert(error.message || "Erro ao processar solicitação");
     } finally {
       setLoadingForm(false);
     }
@@ -166,14 +201,24 @@ export const AdminPanel: React.FC = () => {
 
   return (
     <div className="p-8 h-full overflow-y-auto bg-slate-950 text-white relative">
-      <div className="flex items-center gap-3 mb-8">
-        <div className="p-3 bg-red-500/10 rounded-xl border border-red-500/20">
-            <Shield className="w-8 h-8 text-red-500" />
+      <div className="flex items-center justify-between mb-8">
+        <div className="flex items-center gap-3">
+            <div className="p-3 bg-red-500/10 rounded-xl border border-red-500/20">
+                <Shield className="w-8 h-8 text-red-500" />
+            </div>
+            <div>
+                <h1 className="text-2xl font-bold text-slate-100">Painel Administrativo</h1>
+                <p className="text-slate-400 text-sm">
+                  {isCoord ? 'Gerenciamento de alunos e cursos sob sua coordenação' : 'Gerenciamento global de usuários, permissões e segurança'}
+                </p>
+            </div>
         </div>
-        <div>
-            <h1 className="text-2xl font-bold text-slate-100">Painel Administrativo</h1>
-            <p className="text-slate-400 text-sm">Gerenciamento de usuários, permissões e segurança</p>
-        </div>
+        <button 
+          onClick={handleOpenCreate}
+          className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2"
+        >
+          <UserX className="w-4 h-4 rotate-180" /> Novo Usuário
+        </button>
       </div>
       
       <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden shadow-xl">
@@ -203,33 +248,35 @@ export const AdminPanel: React.FC = () => {
         </table>
       </div>
 
-      {/* --- MODAL DE EDIÇÃO --- */}
-      {editingUser && (
+      {/* --- MODAL DE EDIÇÃO / CRIAÇÃO --- */}
+      {isModalOpen && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden">
             <div className="flex justify-between items-center p-6 border-b border-slate-800 bg-slate-800/50">
-              <h2 className="text-lg font-bold">Editar Cadastro</h2>
-              <button onClick={() => setEditingUser(null)} className="text-slate-400 hover:text-white">
+              <h2 className="text-lg font-bold">{editingUser ? 'Editar Cadastro' : 'Novo Usuário'}</h2>
+              <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-white">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleSaveEdit} className="p-6 space-y-4">
+            <form onSubmit={handleSave} className="p-6 space-y-4">
               <div>
                 <label className="block text-sm text-slate-400 mb-1">Nome Completo</label>
                 <input 
                   type="text" 
                   value={formData.full_name} 
+                  required
                   onChange={e => setFormData({...formData, full_name: e.target.value})}
                   className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 outline-none focus:border-blue-500 text-white"
                 />
               </div>
 
               <div>
-                <label className="block text-sm text-slate-400 mb-1">ID (Login/Email)</label>
+                <label className="block text-sm text-slate-400 mb-1">RA (Registro Acadêmico)</label>
                 <input 
                   type="text" 
                   value={formData.external_id} 
+                  required
                   onChange={e => setFormData({...formData, external_id: e.target.value})}
                   className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 outline-none focus:border-blue-500 text-white"
                 />
@@ -240,8 +287,9 @@ export const AdminPanel: React.FC = () => {
                   <label className="block text-sm text-slate-400 mb-1">Cargo</label>
                   <select 
                     value={formData.role} 
+                    disabled={isCoord}
                     onChange={e => setFormData({...formData, role: e.target.value})}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 outline-none focus:border-blue-500 text-white"
+                    className={`w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 outline-none focus:border-blue-500 text-white ${isCoord ? 'opacity-50 cursor-not-allowed' : ''}`}
                   >
                     <option value="aluno">Aluno</option>
                     <option value="professor">Professor</option>
@@ -251,34 +299,55 @@ export const AdminPanel: React.FC = () => {
                 </div>
                 
                 <div className="flex-1">
-                  <label className="block text-sm text-slate-400 mb-1">Curso</label>
+                  <label className="block text-sm text-slate-400 mb-1">Curso(s)</label>
                   <input 
                     type="text" 
                     value={formData.course} 
                     onChange={e => setFormData({...formData, course: e.target.value})}
-                    placeholder="Ex: Direito"
+                    placeholder="Ex: Direito, Engenharia"
                     className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 outline-none focus:border-blue-500 text-white"
                   />
+                  <p className="text-[10px] text-slate-500 mt-1">* Separe múltiplos cursos por vírgula</p>
+                  {isCoord && formData.role !== 'coordenador' && (
+                    <div className="mt-2">
+                      <p className="text-[10px] text-blue-400 mb-1 font-bold uppercase">Seus cursos permitidos:</p>
+                      <div className="flex flex-wrap gap-1">
+                        {(currentUser.course || "").split(/[,;]/).map((c: string, i: number) => (
+                          <button
+                            key={i}
+                            type="button"
+                            onClick={() => setFormData({...formData, course: c.trim()})}
+                            className="text-[9px] bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded border border-blue-500/30 hover:bg-blue-500/40 transition-colors"
+                          >
+                            {c.trim()}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 
               <div>
-                <label className="block text-sm text-slate-400 mb-1">Nova Senha (opcional)</label>
+                <label className="block text-sm text-slate-400 mb-1">
+                    {editingUser ? 'Nova Senha (opcional)' : 'Senha'}
+                </label>
                 <input 
                   type="password" 
                   value={formData.password} 
+                  required={!editingUser}
                   onChange={e => setFormData({...formData, password: e.target.value})}
-                  placeholder="Preencha apenas se quiser resetar a senha"
+                  placeholder={editingUser ? "Preencha apenas se quiser resetar" : "Mínimo 4 caracteres"}
                   className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 outline-none focus:border-blue-500 text-white placeholder-slate-600"
                 />
               </div>
 
               <div className="pt-4 flex justify-end gap-3">
-                <button type="button" onClick={() => setEditingUser(null)} className="px-4 py-2 text-slate-400 hover:text-white transition-colors">
+                <button type="button" onClick={() => setIsModalOpen(false)} className="px-4 py-2 text-slate-400 hover:text-white transition-colors">
                   Cancelar
                 </button>
                 <button type="submit" disabled={loadingForm} className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-white font-medium transition-colors disabled:opacity-50 flex items-center gap-2">
-                  {loadingForm ? 'Salvando...' : 'Salvar Alterações'}
+                  {loadingForm ? 'Processando...' : editingUser ? 'Salvar Alterações' : 'Criar Usuário'}
                 </button>
               </div>
             </form>

@@ -45,7 +45,7 @@ export default function App() {
             <Route path="/documents" element={<DocumentManager />} />
 
             {/* --- NOVA ROTA DE ADMIN --- */}
-            {auth.user.role === 'administrador' ? (
+            {['administrador', 'coordenador'].includes(auth.user.role || '') ? (
                <Route path="/admin" element={<AdminPanel />} />
             ) : (
                // Se não for admin e tentar acessar, joga pro chat

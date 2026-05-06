@@ -51,6 +51,23 @@ export const api = {
     return res.json();
   },
 
+  async createUser(userData: any, token: string) {
+    const res = await fetch(`${API_URL}/admin/users`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(userData)
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Falha ao criar usuário');
+    }
+    return res.json();
+  },
+
     async unblockUser(userId: string, token: string) {
       const res = await fetch(`${API_URL}/admin/unblock/${userId}`, {
         method: 'POST',

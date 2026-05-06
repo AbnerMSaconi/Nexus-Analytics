@@ -15,7 +15,14 @@ from quebrapdf import quebrar_arquivo_unico
 from app.api import schemas, models
 from app.core import security
 from app.core.database import get_db, SessionLocal
-from app.core.rag import get_rag_chain_async, atualizar_base_de_conhecimento_async, carregar_manifesto, salvar_manifesto, processar_area_especifica_async
+from app.core.rag import (
+    get_rag_chain_async, 
+    atualizar_base_de_conhecimento_async, 
+    carregar_manifesto, 
+    salvar_manifesto, 
+    processar_area_especifica_async,
+    _normalizar_nome_area
+)
 from app.core.config import settings
 from app.core.security import get_current_user, encrypt_message, decrypt_message
 from app.utils.performance import PerformanceMonitor
@@ -66,11 +73,28 @@ def log_activity(db: Session, user: models.User, activity: str, status_log: str,
 # 2. ROTAS DE AUTENTICAÇÃO E PERFIL
 # ==============================================================================
 
+def validar_cursos_usuario(role: str, course_str: str):
+    """
+    Valida a regra de cursos:
+    - Aluno: Máximo 2 cursos (sem restrição de turno).
+    - Professor/Coordenador: Múltiplos cursos permitidos.
+    """
+    if not course_str:
+        return
+    
+    import re
+    cursos = [c.strip().lower() for c in re.split(r'[,;]', course_str) if c.strip()]
+    
+    if role.lower() == "aluno":
+        if len(cursos) > 2:
+            raise HTTPException(status_code=400, detail="Um aluno pode estar matriculado em no máximo 2 cursos.")
+
 @router.post("/signup", response_model=schemas.Token)
 async def signup(user_in: schemas.UserCreate, db: Session = Depends(get_db)):
     """
     Registra um novo usuário.
     """
+    validar_cursos_usuario("aluno", user_in.course)
     user = db.query(models.User).filter(models.User.external_id == user_in.external_id).first()
     if user:
         raise HTTPException(status_code=400, detail="ID/Usuário já cadastrado.")
@@ -80,11 +104,11 @@ async def signup(user_in: schemas.UserCreate, db: Session = Depends(get_db)):
     # FORÇADO: Por segurança, novos cadastros via API externa são sempre ALUNOS.
     # Promoção para Admin deve ser feita via script de terminal.
     new_user = models.User(
-        external_id=user_in.external_id,
+        external_id=user_in.external_id.lower().strip(),
         full_name=user_in.full_name,
         password_hash=hashed_pw,
-        role="ALUNO", 
-        course=user_in.course
+        role=user_in.role.lower().strip(), 
+        course=user_in.course.lower().strip() if user_in.course else None
     )
     
     db.add(new_user)
@@ -106,7 +130,7 @@ async def signup(user_in: schemas.UserCreate, db: Session = Depends(get_db)):
 
 @router.post("/login", response_model=schemas.Token)
 async def login(user_in: schemas.UserLogin, db: Session = Depends(get_db)):
-    user = db.query(models.User).filter(models.User.external_id == user_in.external_id).first()
+    user = db.query(models.User).filter(models.User.external_id == user_in.external_id.lower().strip()).first()
     
     if not user:
         raise HTTPException(status_code=401, detail="Credenciais inválidas.")
@@ -205,13 +229,19 @@ async def ingest_files(background_tasks: BackgroundTasks, current_user: models.U
 @router.websocket("/ws/{user_id}")
 async def websocket_endpoint(websocket: WebSocket, user_id: str):
     logger.info(f"🔍 Tentativa de conexão WS recebida para user_id: {user_id}")
-    await manager.connect(user_id, websocket)
     try:
+        await manager.connect(user_id, websocket)
         while True:
-            # Mantém a conexão aberta
+            # Mantém a conexão aberta e responde a pings do cliente se necessário
             await websocket.receive_text()
     except WebSocketDisconnect:
         await manager.disconnect(user_id, websocket)
+    except Exception as e:
+        logger.error(f"⚠️ Erro inesperado no WebSocket para {user_id}: {e}")
+        try:
+            await manager.disconnect(user_id, websocket)
+        except:
+            pass
 
 @router.post("/admin/upload")
 async def upload_files_to_area(
@@ -360,44 +390,56 @@ async def delete_conversation(
 async def chat(request: Request, body: schemas.ChatRequest, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
     # 2. RBAC: Restrição de Área por Curso (BLINDADO)
     role_usuario = (current_user.role or "").lower().strip()
-    
+
+    # Normalização da área solicitada para comparação
+    area_solicitada_raw = body.area or "geral"
+    area_solicitada_clean = _normalizar_nome_area(area_solicitada_raw)
+
     if role_usuario in ["aluno", "professor"]:
-        area_solicitada = (body.area or "geral").lower().strip()
-        curso_usuario = (current_user.course or "").lower().strip()
-        
+        # Suporte a múltiplos cursos (separados por vírgula)
+        import re
+        cursos_usuario = [c.strip().lower() for c in re.split(r'[,;]', current_user.course or "") if c.strip()]
+
         # 1. Todo aluno/professor tem acesso à base 'Geral'
         areas_permitidas = ["geral"]
-        
-        # 2. Se o usuário tiver um curso cadastrado, adicionamos à lista de permissões
-        if curso_usuario:
-            areas_permitidas.append(curso_usuario)
-            
-            # 3. Regra de Engenharias e Tecnologias
-            if "engenharia" in curso_usuario or "tecnologia" in curso_usuario:
+
+        # 2. Adicionamos todos os cursos do usuário às permissões
+        areas_permitidas.extend(cursos_usuario)
+
+        # 3. Regra de Engenharias e Tecnologias para todos os cursos dele
+        for curso in cursos_usuario:
+            if "engenharia" in curso or "tecnologia" in curso:
                 areas_permitidas.extend(["engenharia", "engenharias", "tecnologia", "tecnologias"])
-        
+
         # 4. Verifica se o que ele pediu está dentro do que ele pode acessar
         acesso_concedido = False
-        area_solicitada_clean = area_solicitada.lower().strip().replace(" ", "_")
-        
+
         for permitida in areas_permitidas:
             permitida_clean = permitida.lower().strip().replace(" ", "_")
-            # Match exato ou match de categoria (ex: engenharia_civil contém engenharia)
-            if permitida_clean == area_solicitada_clean or permitida_clean in area_solicitada_clean:
+            # Correção: permitida_clean in area_solicitada_clean OU area_solicitada_clean in permitida_clean
+            # Isso permite que 'engenharia_de_software' acesse 'engenharia' e vice-versa
+            if (permitida_clean == area_solicitada_clean or 
+                permitida_clean in area_solicitada_clean or 
+                area_solicitada_clean in permitida_clean):
                 acesso_concedido = True
                 break
-                
+
         # 5. Se não passou na validação, BLOQUEIA
         if not acesso_concedido:
-            log_activity(db, current_user, "ACCESS_DENIED_AREA", "WARNING", f"{current_user.role} de {curso_usuario} tentou acessar {body.area}")
-            
+            log_activity(db, current_user, "ACCESS_DENIED_AREA", "WARNING", f"{current_user.role} de {current_user.course} tentou acessar {body.area}")
+
             # Mensagem amigável de erro
             curso_display = current_user.course if current_user.course else "Geral (Nenhum curso cadastrado)"
             msg = f"Acesso Negado: {current_user.role.capitalize()}s de {curso_display} não têm permissão para acessar a base de {body.area}."
-            
+
             return StreamingResponse(iter([f'data: {json.dumps({"type": "error", "content": msg})}\n\n']))
 
-    log_activity(db, current_user, "CHAT_START", "INFO", f"Chat na area {body.area}")
+    # --- ISOLAMENTO ESTRITO DE ÁREA ---
+    # O sistema agora respeita RIGOROSAMENTE a área selecionada pelo usuário.
+    # Não há mais redirecionamento automático para evitar mistura de contextos.
+    area_final = area_solicitada_raw
+
+    log_activity(db, current_user, "CHAT_START", "INFO", f"Chat estrito na area {area_final}")
 
     # 1. Proteção contra Prompt Injection (Básico)
     forbidden_patterns = [
@@ -413,25 +455,36 @@ async def chat(request: Request, body: schemas.ChatRequest, db: Session = Depend
         return StreamingResponse(iter([f'data: {json.dumps({"type": "error", "content": msg})}\n\n']))
 
     from app.core.rag import get_rag_chain_async
-    rag_chain = await get_rag_chain_async(body.area)
-    
-    if not rag_chain: 
-        msg = f"A base de conhecimento '{body.area}' ainda não foi indexada. Por favor, adicione documentos e processe-os no painel administrativo."
-        return StreamingResponse(iter([f'data: {json.dumps({"type": "error", "content": msg})}\n\n']))
+    rag_chain = await get_rag_chain_async(area_final)
 
-    # 3. Cria Conversa e Mensagem
+    if not rag_chain: 
+        # Em vez de erro técnico, retornamos uma resposta amigável do bot explicando a situação
+        friendly_msg = (
+            f"### ⚠️ Base de Conhecimento: {area_final.capitalize()}\n\n"
+            f"Olá! Notei que a base de conhecimento **{area_final}** ainda não possui documentos processados no sistema.\n\n"
+            f"Como sou um assistente focado em documentos oficiais da UCDB, preciso que PDFs sejam enviados e processados para esta área para que eu possa te responder com precisão.\n\n"
+            f"**O que fazer?**\n"
+            f"- Se você for um administrador, acesse o **Gerenciador de Documentos** e realize o upload para esta área.\n"
+            f"- Se for um aluno, entre em contato com a coordenação do seu curso para que disponibilizem os materiais aqui."
+        )
+
+        async def empty_stream():
+            yield f"data: {json.dumps({'type': 'start'})}\n\n"
+            yield f"data: {json.dumps({'type': 'chunk', 'content': friendly_msg})}\n\n"
+            yield f"data: {json.dumps({'type': 'complete'})}\n\n"
+
+        return StreamingResponse(empty_stream(), media_type="text/event-stream")    # 3. Cria Conversa e Mensagem
     new_conv = models.Conversation(
         user_id=current_user.id,
         title=body.message[:40] + "...",
-        area=body.area or "Geral"
+        area=area_final
     )
     db.add(new_conv)
     db.commit()
-    
+
     encrypted_input = encrypt_message(body.message)
     db.add(models.Message(conversation_id=new_conv.id, role="user", content=encrypted_input))
     db.commit()
-
     async def event_stream():
         async with PerformanceMonitor.async_timer("Geração de Resposta Total (End-to-End)"):
             full_answer = ""
@@ -487,14 +540,83 @@ async def chat(request: Request, body: schemas.ChatRequest, db: Session = Depend
 
 @router.get("/admin/users", response_model=List[schemas.UserResponse])
 async def list_users_admin(current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
-    if current_user.role != "administrador":
-        raise HTTPException(status_code=403, detail="Acesso restrito a administradores.")
-    return db.query(models.User).all()
+    if current_user.role == "administrador":
+        return db.query(models.User).all()
+    
+    if current_user.role == "coordenador":
+        # Se não tiver curso definido, não vê ninguém
+        if not current_user.course:
+            return []
+            
+        # Pega a lista de cursos do coordenador (separados por vírgula ou ponto e vírgula)
+        import re
+        coordinators_courses = [c.strip().lower() for c in re.split(r'[,;]', current_user.course) if c.strip()]
+        
+        # Busca todos os alunos (case-insensitive para o cargo)
+        from sqlalchemy import func
+        all_students = db.query(models.User).filter(func.lower(models.User.role) == "aluno").all()
+        
+        # Filtra manualmente para garantir match flexível (ex: 'Direito' em 'Direito Matutino')
+        filtered = []
+        for student in all_students:
+            student_course = (student.course or "").lower().strip()
+            if any(coord_course in student_course for coord_course in coordinators_courses):
+                filtered.append(student)
+        return filtered
+
+    raise HTTPException(status_code=403, detail="Acesso restrito.")
+
+@router.post("/admin/users", response_model=schemas.UserResponse)
+async def create_user_admin(
+    user_in: schemas.UserCreate, 
+    current_user: models.User = Depends(get_current_user), 
+    db: Session = Depends(get_db)
+):
+    """
+    Cria um novo usuário (Restrito a administradores e coordenadores).
+    """
+    if current_user.role not in ["administrador", "coordenador"]:
+        raise HTTPException(status_code=403, detail="Acesso restrito.")
+
+    # Validação para Coordenador: só pode criar Aluno na sua área
+    if current_user.role == "coordenador":
+        if user_in.role.lower() != "aluno":
+            raise HTTPException(status_code=403, detail="Coordenadores só podem cadastrar alunos.")
+        
+        import re
+        coordinators_courses = [c.strip().lower() for c in re.split(r'[,;]', current_user.course or "") if c.strip()]
+        student_course = (user_in.course or "").lower().strip()
+        
+        if not any(coord_course in student_course for coord_course in coordinators_courses):
+            raise HTTPException(status_code=403, detail="Você só pode cadastrar alunos em seus cursos de atuação.")
+
+    validar_cursos_usuario(user_in.role, user_in.course)
+
+    user = db.query(models.User).filter(models.User.external_id == user_in.external_id).first()
+    if user:
+        raise HTTPException(status_code=400, detail="ID/Usuário já cadastrado.")
+    
+    hashed_pw = security.get_password_hash(user_in.password)
+    
+    new_user = models.User(
+        external_id=user_in.external_id.lower().strip(),
+        full_name=user_in.full_name,
+        password_hash=hashed_pw,
+        role=user_in.role.lower().strip(), 
+        course=user_in.course.lower().strip() if user_in.course else None
+    )
+    
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    
+    log_activity(db, current_user, "ADMIN_CREATE_USER", "INFO", f"Criou novo usuário: {new_user.external_id}")
+    return new_user
 
 @router.delete("/admin/users/{user_id}")
 async def delete_user(user_id: str, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
     # 1. Permissão
-    if current_user.role != "administrador":
+    if current_user.role not in ["administrador", "coordenador"]:
         raise HTTPException(status_code=403, detail="Acesso restrito.")
 
     # 2. Busca Usuário
@@ -502,9 +624,21 @@ async def delete_user(user_id: str, current_user: models.User = Depends(get_curr
     if not user_to_delete:
         raise HTTPException(status_code=404, detail="Usuário não encontrado.")
 
-    # 3. Proteção Auto-Exclusão
+    # 3. Proteções
     if user_to_delete.id == current_user.id:
         raise HTTPException(status_code=400, detail="Você não pode excluir sua própria conta.")
+
+    # Validação para Coordenador: só pode excluir Aluno na sua área
+    if current_user.role == "coordenador":
+        if user_to_delete.role != "aluno":
+            raise HTTPException(status_code=403, detail="Coordenadores só podem excluir alunos.")
+        
+        import re
+        coordinators_courses = [c.strip().lower() for c in re.split(r'[,;]', current_user.course or "") if c.strip()]
+        student_course = (user_to_delete.course or "").lower().strip()
+        
+        if not any(coord_course in student_course for coord_course in coordinators_courses):
+            raise HTTPException(status_code=403, detail="Você não tem permissão para excluir este aluno.")
 
     # 4. Exclusão
     try:
@@ -529,7 +663,7 @@ async def update_user_role(
     db: Session = Depends(get_db)
 ):
     if current_user.role != "administrador":
-        raise HTTPException(status_code=403, detail="Acesso restrito.")
+        raise HTTPException(status_code=403, detail="Acesso restrito. Apenas administradores podem alterar cargos.")
     
     user_target = db.query(models.User).filter(models.User.id == user_id).first()
     if not user_target:
@@ -548,12 +682,23 @@ async def update_user_role(
 
 @router.post("/admin/unblock/{user_id}")
 async def unblock_user(user_id: str, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
-    if current_user.role != "administrador":
+    if current_user.role not in ["administrador", "coordenador"]:
         raise HTTPException(status_code=403, detail="Acesso restrito.")
         
     user_target = db.query(models.User).filter(models.User.id == user_id).first()
     if not user_target:
         raise HTTPException(404, "Usuário não encontrado")
+
+    # Validação Coordenador
+    if current_user.role == "coordenador":
+        if user_target.role != "aluno":
+             raise HTTPException(status_code=403, detail="Permissão negada.")
+        
+        import re
+        coordinators_courses = [c.strip().lower() for c in re.split(r'[,;]', current_user.course or "") if c.strip()]
+        student_course = (user_target.course or "").lower().strip()
+        if not any(coord_course in student_course for coord_course in coordinators_courses):
+            raise HTTPException(status_code=403, detail="Permissão negada para este aluno.")
         
     user_target.is_blocked = False
     if hasattr(user_target, 'failed_attempts'):
@@ -570,31 +715,61 @@ async def update_user_details(
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    if current_user.role != "administrador":
+    if current_user.role not in ["administrador", "coordenador"]:
         raise HTTPException(status_code=403, detail="Acesso restrito.")
     
     user_target = db.query(models.User).filter(models.User.id == user_id).first()
     if not user_target:
         raise HTTPException(status_code=404, detail="Usuário não encontrado.")
+
+    # Validação Coordenador
+    if current_user.role == "coordenador":
+        if user_target.role != "aluno":
+             raise HTTPException(status_code=403, detail="Coordenadores só podem editar alunos.")
+        
+        import re
+        coordinators_courses = [c.strip().lower() for c in re.split(r'[,;]', current_user.course or "") if c.strip()]
+        
+        # Valida aluno original
+        student_course_orig = (user_target.course or "").lower().strip()
+        if not any(coord_course in student_course_orig for coord_course in coordinators_courses):
+            raise HTTPException(status_code=403, detail="Permissão negada para editar este aluno.")
+
+        # Valida se está tentando mudar o cargo
+        if user_data.role and user_data.role.lower() != "aluno":
+            raise HTTPException(status_code=403, detail="Coordenadores só podem manter o cargo de Aluno.")
+            
+        # Valida se está tentando mover o aluno para um curso fora da sua coordenação
+        if user_data.course:
+            new_course = user_data.course.lower().strip()
+            if not any(coord_course in new_course for coord_course in coordinators_courses):
+                raise HTTPException(status_code=403, detail="Você não pode mover o aluno para um curso fora da sua coordenação.")
     
+    # Valida a regra de múltiplos cursos e turnos
+    role_para_validar = user_data.role if user_data.role else user_target.role
+    curso_para_validar = user_data.course if user_data.course is not None else user_target.course
+    validar_cursos_usuario(role_para_validar, curso_para_validar)
+
     # Valida e atualiza ID/Login
-    if user_data.external_id and user_data.external_id != user_target.external_id:
-        existing = db.query(models.User).filter(models.User.external_id == user_data.external_id).first()
+    if user_data.external_id and user_data.external_id.lower().strip() != user_target.external_id:
+        new_ext_id = user_data.external_id.lower().strip()
+        existing = db.query(models.User).filter(models.User.external_id == new_ext_id).first()
         if existing:
-            raise HTTPException(status_code=400, detail="Este ID/Login já está em uso por outro usuário.")
-        user_target.external_id = user_data.external_id
+            raise HTTPException(status_code=400, detail="Este RA já está em uso por outro usuário.")
+        user_target.external_id = new_ext_id
 
     # Atualiza demais campos
     if user_data.full_name is not None:
         user_target.full_name = user_data.full_name
         
     if user_data.role:
-        if user_target.id == current_user.id and user_data.role != "administrador":
+        new_role = user_data.role.lower().strip()
+        if user_target.id == current_user.id and new_role != "administrador":
              raise HTTPException(status_code=400, detail="Você não pode alterar seu próprio cargo de administrador.")
-        user_target.role = user_data.role
+        user_target.role = new_role
         
     if user_data.course is not None:
-        user_target.course = user_data.course
+        user_target.course = user_data.course.lower().strip() if user_data.course else None
         
     # Reset de senha
     if user_data.password:
@@ -602,6 +777,10 @@ async def update_user_details(
 
     try:
         db.commit()
+        # LIMPEZA DE CACHE: Se o cargo ou curso mudaram, limpamos o cache para forçar recarregamento das permissões
+        from app.core.rag import _vs_cache
+        _vs_cache.cache.clear()
+        
         log_activity(db, current_user, "ADMIN_UPDATE_USER", "INFO", f"Atualizou o cadastro do usuário {user_target.external_id}")
         return {"status": "success", "message": "Usuário atualizado com sucesso"}
     except Exception as e:

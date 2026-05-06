@@ -167,14 +167,14 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
 
           {/* Usuário */}
           <div>
-            <label className="block text-xs uppercase tracking-wider text-slate-500 font-bold mb-2 ml-1">Usuário (ID/RA)</label>
+            <label className="block text-xs uppercase tracking-wider text-slate-500 font-bold mb-2 ml-1">RA (Registro Acadêmico)</label>
             <input 
               type="text" 
               required
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               className="w-full bg-slate-950 border border-slate-800 text-white rounded-lg py-3 px-4 focus:outline-none focus:border-[#003366] focus:ring-1 focus:ring-[#003366] transition-all"
-              placeholder="ex: ra123456"
+              placeholder="ex: 123456"
             />
           </div>
 

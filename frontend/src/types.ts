@@ -36,6 +36,7 @@ export interface ChatSession {
   userId: string;
   title: string;
   messages: Message[];
+  area?: string; // Área de conhecimento associada (ex: 'Geral', 'Engenharia')
   createdAt: Date;
   updatedAt: Date;
 }

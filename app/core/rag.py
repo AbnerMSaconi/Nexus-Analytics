@@ -196,17 +196,27 @@ def _sanitizar_resposta(texto: str) -> str:
 # 2. GERADOR DE TÍTULOS (IA BLINDADA - ASYNC)
 # ==============================================================================
 
-async def _gerar_topico_documento_async(texto_bruto: str) -> str:
-    """Usa o LLM para dar um nome descritivo ao conteúdo do arquivo (Versão Async)."""
-    amostra = texto_bruto[:1000].replace("\n", " ").strip()
+async def _gerar_topico_documento_async(texto_bruto: str, nome_arquivo_original: str = None) -> str:
+    """Usa o LLM para dar um nome descritivo ao conteúdo do arquivo (Versão Async Otimizada)."""
+    # Aumentamos a amostra para 2000 caracteres para dar mais contexto
+    amostra = texto_bruto[:2000].replace("\n", " ").strip()
     
-    system_instruction = """ATENÇÃO: Você é uma API de extração de metadados. 
-    Sua ÚNICA função é ler o texto e extrair um Tópico Central de 3 a 6 palavras.
-    REGRAS: 1. APENAS o título. 2. Sem 'O texto fala sobre'. 3. Máximo 6 palavras."""
+    # Se o texto for muito curto ou irrelevante, usamos o nome do arquivo
+    if len(amostra) < 50 and nome_arquivo_original:
+        return nome_arquivo_original.replace("_", " ").replace(".pdf", "").title()[:60]
+
+    system_instruction = """ATENÇÃO: Você é um bibliotecário acadêmico da UCDB.
+    Sua tarefa é ler o trecho de um documento e criar um Título Curto e Profissional (3 a 6 palavras).
+    REGRAS:
+    1. Responda APENAS com o título.
+    2. NUNCA use "Documento Processado", "Sem Título" ou frases genéricas.
+    3. Se o texto for jurídico, use o número da lei ou decreto se aparecer.
+    4. Se for acadêmico, use o tema central (ex: Cálculo Diferencial, História do Brasil).
+    5. Máximo 60 caracteres."""
 
     prompt = ChatPromptTemplate.from_messages([
         ("system", system_instruction),
-        ("human", "TEXTO PARA ANÁLISE:\n---\n{texto_amostra}\n---\n\nTÓPICO CENTRAL:")
+        ("human", "TEXTO PARA ANÁLISE:\n---\n{texto_amostra}\n---\n\nQUAL O TEMA CENTRAL DESTE TEXTO?")
     ])
 
     chain = prompt | get_cached_llm() | StrOutputParser()
@@ -214,11 +224,21 @@ async def _gerar_topico_documento_async(texto_bruto: str) -> str:
     try:
         raw_titulo = await chain.ainvoke({"texto_amostra": amostra})
         titulo = raw_titulo.strip().replace('"', '').replace("'", "").replace("*", "").replace("#", "")
-        titulo = re.sub(r'^(Título|Tópico|Assunto|Tema|Title|Topic):\s*', '', titulo, flags=re.IGNORECASE)
+        titulo = re.sub(r'^(Título|Tópico|Assunto|Tema|Title|Topic|Resposta):\s*', '', titulo, flags=re.IGNORECASE)
+        
+        # Validação final: se a IA retornar algo inútil ou vazio, usamos o nome do arquivo
+        invalid_titles = ["documento processado", "sem título", "desconhecido", "tópico central", "não identificado"]
+        if not titulo or any(it in titulo.lower() for it in invalid_titles):
+            if nome_arquivo_original:
+                return nome_arquivo_original.replace("_", " ").replace(".pdf", "").title()[:60]
+            return "Documento Acadêmico"
+            
         return titulo.strip()[:60]
     except Exception as e:
         logger.error(f"Erro ao gerar título async: {e}")
-        return "Documento Processado"
+        if nome_arquivo_original:
+            return nome_arquivo_original.replace("_", " ").replace(".pdf", "").title()[:60]
+        return "Documento Acadêmico"
 
 # ==============================================================================
 # 3. INGESTÃO GLOBAL BLINDADA (VARREDURA COMPLETA - ASYNC)
@@ -271,7 +291,7 @@ async def atualizar_base_de_conhecimento_async():
                 if not full_docs: continue
 
                 texto_para_titulo = " ".join([d.page_content for d in full_docs[:3]])
-                titulo_gerado = await _gerar_topico_documento_async(texto_para_titulo)
+                titulo_gerado = await _gerar_topico_documento_async(texto_para_titulo, arq)
 
                 for d in full_docs:
                     d.metadata.update({"source": arq, "area": nome_pasta, "topic": titulo_gerado})
@@ -508,11 +528,9 @@ async def processar_area_especifica_async(area: str, caminhos_arquivos: List[str
             logger.warning(f"⚠️ Nenhum texto extraído de {nome_arquivo}. O PDF pode ser apenas imagem.")
             continue
 
-        logger.info(f"📄 {nome_arquivo}: {len(full_docs)} páginas encontradas.")
-
         # Título inteligente baseado no conteúdo
         texto_para_titulo = " ".join([d.page_content for d in full_docs[:2]])
-        titulo_gerado = await _gerar_topico_documento_async(texto_para_titulo)
+        titulo_gerado = await _gerar_topico_documento_async(texto_para_titulo, nome_arquivo)
 
         # Extração de título de capítulo se for parte
         if "_parte_" in nome_arquivo:
@@ -617,15 +635,17 @@ async def get_rag_chain_async(area: str = "Geral"):
 
     caminho_indice = os.path.join(settings.vectorstore_path, f"index_{area_key}")
 
-    # Fallback: Se não existe index_area, tenta o index_geral se a área for nula
+    # Fallback: Se não existe index_area, tenta o index_geral (se a área atual não for geral)
     if not os.path.exists(caminho_indice):
-        logger.warning(f"Índice não encontrado para a área: {area_key}. Tentando fallback 'geral'...")
-        area_key = "geral"
-        caminho_indice = os.path.join(settings.vectorstore_path, f"index_{area_key}")
-
-    if not os.path.exists(caminho_indice):
-        logger.error(f"Nenhum índice encontrado (nem mesmo fallback 'geral').")
-        return None
+        if area_key != "geral":
+            logger.warning(f"Índice '{area_key}' não encontrado. Tentando fallback 'geral'...")
+            area_key = "geral"
+            caminho_indice = os.path.join(settings.vectorstore_path, f"index_{area_key}")
+        
+        # Verifica se o fallback 'geral' (ou a área original se for geral) existe
+        if not os.path.exists(caminho_indice):
+            logger.error(f"Nenhum índice encontrado para '{area_key}'.")
+            return None
 
     # Tenta obter do cache
     vectorstore = _vs_cache.get(caminho_indice)

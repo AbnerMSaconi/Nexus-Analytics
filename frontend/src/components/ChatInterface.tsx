@@ -4,6 +4,7 @@ import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import { generateRAGResponse } from "../services/apiService";
 import { StorageService } from '../services/storageService';
+import { api } from '../assets/api';
 import type { Message, ChatSession, User } from '../types';
 
 declare global {
@@ -19,15 +20,52 @@ interface ChatInterfaceProps {
 export const ChatInterface: React.FC<ChatInterfaceProps> = ({ user }) => {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  const [availableAreas, setAvailableAreas] = useState<string[]>(['Geral']);
   const [input, setInput] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null); // REF PARA O TEXTAREA
+  const textareaRef = useRef<HTMLTextAreaElement>(null); 
 
   useEffect(() => {
     loadSessions();
+    loadAreas();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user.id]);
+
+  const loadAreas = async () => {
+    try {
+      const response = await api.getKnowledgeAreas();
+      // Áreas vindas das pastas no servidor (ex: index_engenharia -> Engenharia)
+      const areasFromApi = response && response.data ? response.data.map((a: any) => a.area) : [];
+      
+      // Cursos do perfil do usuário
+      const userCourses = user.course ? user.course.split(/[,;]/).map(c => c.trim()) : [];
+      
+      // Criamos um Set de nomes normalizados (lowercase) para evitar duplicatas visuais
+      // mas mantemos a capitalização original para exibição
+      const seen = new Set<string>();
+      const uniqueList: string[] = [];
+      
+      // Ordem de prioridade: Geral -> Cursos do Usuário -> Outras Áreas da API
+      const candidates = ['Geral', ...userCourses, ...areasFromApi];
+      
+      candidates.forEach(area => {
+        if (!area) return;
+        const normalized = area.toLowerCase().trim();
+        if (!seen.has(normalized)) {
+          seen.add(normalized);
+          uniqueList.push(area);
+        }
+      });
+      
+      setAvailableAreas(uniqueList);
+    } catch (e) {
+      console.error("Erro ao carregar áreas:", e);
+      const userCourses = user.course ? user.course.split(/[,;]/).map(c => c.trim()) : [];
+      const fallback = Array.from(new Set(['Geral', ...userCourses]));
+      setAvailableAreas(fallback);
+    }
+  };
 
   useEffect(() => {
     if (window.MathJax && window.MathJax.typesetPromise) {
@@ -35,14 +73,9 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ user }) => {
     }
   }, [sessions, isProcessing]);
 
-  // EFEITO DE AUTOGROW (Crescimento Automático)
   useEffect(() => {
     if (textareaRef.current) {
-      // 1. Reseta a altura para calcular o scrollHeight real (caso apague texto)
       textareaRef.current.style.height = 'auto';
-      
-      // 2. Define a nova altura baseada no conteúdo, limitando visualmente via CSS max-h
-      // O scrollHeight inclui o padding. 
       textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
     }
   }, [input]);
@@ -51,7 +84,6 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ user }) => {
     const loadedSessions = await StorageService.getSessions(user.id);
     setSessions(loadedSessions);
     
-    // Só cria se REALMENTE não houver nada e não estivermos no meio de um carregamento
     if (loadedSessions.length > 0) {
       if (!currentSessionId) setCurrentSessionId(loadedSessions[0].id);
     } else {
@@ -60,18 +92,21 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ user }) => {
   };
 
   const createNewSession = async () => {
-    // Evita duplicidade se já houver uma sessão vazia no topo
     setSessions(prev => {
       if (prev.length > 0 && prev[0].messages.length === 0) {
         setCurrentSessionId(prev[0].id);
         return prev;
       }
 
+      // Define a área inicial baseada no curso do usuário ou 'Geral'
+      const initialArea = user.course ? user.course.split(/[,;]/)[0].trim() : 'Geral';
+
       const newSession: ChatSession = {
         id: crypto.randomUUID(),
         userId: user.id,
         title: 'Nova Conversa',
         messages: [],
+        area: initialArea,
         createdAt: new Date(),
         updatedAt: new Date()
       };
@@ -80,6 +115,19 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ user }) => {
       setCurrentSessionId(newSession.id);
       return [newSession, ...prev];
     });
+  };
+
+  const updateSessionArea = async (area: string) => {
+    if (!currentSessionId) return;
+    
+    setSessions(prev => prev.map(s => {
+      if (s.id === currentSessionId) {
+        const updated = { ...s, area, updatedAt: new Date() };
+        StorageService.saveSession(updated);
+        return updated;
+      }
+      return s;
+    }));
   };
 
   const deleteSession = async (e: React.MouseEvent, sessionId: string) => {
@@ -110,21 +158,14 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ user }) => {
 
   const renderMarkdown = (content: string) => {
     try {
-      // 1. Protege blocos de MathJax para que o marked não os corrompa
       const mathBlocks: string[] = [];
-      // Regex melhorada para capturar $...$ e $$...$$
       const tempContent = content.replace(/(\$\$.*?\$\$|\$.*?\$)/gs, (match) => {
         mathBlocks.push(match);
         return `@@MATHBLOCK${mathBlocks.length - 1}@@`;
       });
 
-      // 2. Converte o Markdown para HTML (marked)
       const html = marked.parse(tempContent, { async: false }) as string;
-
-      // 3. Sanitiza o HTML
       const cleanHtml = DOMPurify.sanitize(html);
-
-      // 4. Restaura as fórmulas originais
       const finalHtml = cleanHtml.replace(/@@MATHBLOCK(\d+)@@/g, (_, id) => {
         return mathBlocks[parseInt(id)];
       });
@@ -135,23 +176,18 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ user }) => {
     }
   };
 
-  // Efeito para re-processar MathJax sempre que as mensagens mudarem
   useEffect(() => {
     if (window.MathJax && window.MathJax.typesetPromise) {
-      // Usamos requestAnimationFrame para garantir que o React já pintou o HTML no DOM
       requestAnimationFrame(() => {
         window.MathJax.typesetPromise().catch((err: any) => console.error('MathJax error:', err));
       });
     }
   }, [sessions, isProcessing, currentSessionId]);
 
-  // HANDLER PARA TECLA ENTER
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    // Se apertar Enter (sem Shift) e tiver texto, envia
     if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault(); // Evita pular linha
+      e.preventDefault();
       if (input.trim() && !isProcessing) {
-        // Dispara o evento de submit do formulário manualmente
         handleSendMessage(e as unknown as React.FormEvent);
       }
     }
@@ -162,10 +198,12 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ user }) => {
     if (!input.trim() || !currentSessionId) return;
     
     const userText = input;
+    const sessionToUpdate = sessions.find(s => s.id === currentSessionId);
+    if (!sessionToUpdate) return;
+
     setInput('');
     setIsProcessing(true);
 
-    // Reseta altura do textarea forçadamente após envio
     if (textareaRef.current) {
         textareaRef.current.style.height = 'auto';
     }
@@ -176,9 +214,6 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ user }) => {
       content: userText,
       timestamp: new Date()
     };
-
-    const sessionToUpdate = sessions.find(s => s.id === currentSessionId);
-    if (!sessionToUpdate) return;
 
     const updatedSession = { 
       ...sessionToUpdate, 
@@ -195,30 +230,8 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ user }) => {
 
     try {
       const token = localStorage.getItem('nexus_token');
-      
-      // === NOVA LÓGICA DE ROTEAMENTO DE PERSONA ===
-      let areaSolicitada = "Geral"; // Fallback padrão
-      
-      if (user.course) {
-        const cursoNormalizado = user.course.toLowerCase();
-        
-        // Mapeia o curso do aluno para o banco de dados vetorial correspondente
-        if (cursoNormalizado.includes("engenharia") || cursoNormalizado.includes("arquitetura")) {
-          areaSolicitada = "engenharia";
-        } else if (cursoNormalizado.includes("direito")) {
-          areaSolicitada = "direito";
-        } else if (cursoNormalizado.includes("tecnologia") || cursoNormalizado.includes("computa") || cursoNormalizado.includes("sistemas")) {
-          areaSolicitada = "tecnologia";
-        } else if (cursoNormalizado.includes("saude") || cursoNormalizado.includes("medicina") || cursoNormalizado.includes("enfermagem") || cursoNormalizado.includes("veterinaria")) {
-          areaSolicitada = "saude";
-        } else {
-          areaSolicitada = user.course; 
-        }
-      }
-
-      // Agora sim, chamamos a API passando a área correta do aluno!
+      const areaSolicitada = sessionToUpdate.area || "Geral";
       const aiResponse = await generateRAGResponse(userText, areaSolicitada, token);
-      // =============================================
 
       const botMsg: Message = {
         id: crypto.randomUUID(),
@@ -303,13 +316,40 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ user }) => {
           </div>
         ) : (
           <>
-            {/* Header */}
-            <div className="h-14 border-b border-slate-800 flex items-center justify-between px-6 bg-slate-900/50 backdrop-blur">
-              <div className="flex items-center gap-2">
-                <Cpu className="w-5 h-5 text-blue-400" />
-                <span className="text-slate-200 font-medium">{currentSession?.title}</span>
-              </div>
+            {/* Header com Seletor de Área */}
+            <div className="h-16 border-b border-slate-800 flex items-center justify-between px-6 bg-slate-900/50 backdrop-blur z-20">
               <div className="flex items-center gap-4">
+                <div className="relative group">
+                  <select
+                    value={currentSession?.area || 'Geral'}
+                    onChange={(e) => updateSessionArea(e.target.value)}
+                    className="appearance-none bg-slate-800 border border-slate-700 text-white text-sm rounded-xl px-4 py-2 pr-10 focus:outline-none focus:border-blue-500 transition-all cursor-pointer hover:bg-slate-750 font-medium capitalize"
+                  >
+                    {availableAreas.map(area => (
+                      <option key={area} value={area}>{area}</option>
+                    ))}
+                  </select>
+                  <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
+                    <BookOpen className="w-4 h-4" />
+                  </div>
+                </div>
+                {(currentSession?.area?.toLowerCase() === 'geral' || !currentSession?.area) && (
+                  <span className="text-[10px] bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded border border-blue-500/20 font-bold uppercase tracking-wider">
+                    Institucional
+                  </span>
+                )}
+                {currentSession?.area && currentSession.area.toLowerCase() !== 'geral' && (
+                  <span className="text-[10px] bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded border border-emerald-500/20 font-bold uppercase tracking-wider">
+                    Base Especializada
+                  </span>
+                )}
+              </div>
+              
+              <div className="flex items-center gap-4">
+                <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-slate-800/50 rounded-lg border border-slate-700/50">
+                  <Cpu className="w-4 h-4 text-blue-400" />
+                  <span className="text-xs text-slate-300 font-medium">Modelo UCDB-IA</span>
+                </div>
                 {currentSession && currentSession.messages.length > 0 && (
                   <button 
                     onClick={() => StorageService.exportSessionToTxt(currentSession)}
@@ -320,10 +360,6 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ user }) => {
                     <span className="hidden sm:inline">Exportar</span>
                   </button>
                 )}
-                <div className="text-xs text-slate-500 flex items-center gap-1">
-                  <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
-                  RAG Engine Online
-                </div>
               </div>
             </div>
 
@@ -367,7 +403,6 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ user }) => {
                         )}
                       </div>
 
-                      {/* AREA DE CITAÇÕES */}
                       {msg.role === 'assistant' && msg.citations && msg.citations.length > 0 && (
                         <div className="bg-slate-900/50 rounded-lg p-3 border border-slate-800">
                           <p className="text-xs font-semibold text-slate-500 mb-2 flex items-center gap-1">
@@ -416,7 +451,6 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ user }) => {
               <div ref={messagesEndRef} />
             </div>
 
-            {/* Input Area (Agora com Textarea Auto-Grow) */}
             <div className="p-4 bg-slate-900 border-t border-slate-800">
               <form onSubmit={handleSendMessage} className="max-w-4xl mx-auto relative flex items-end">
                 <div className="relative w-full">
@@ -429,7 +463,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ user }) => {
                     disabled={isProcessing}
                     rows={1}
                     className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl py-4 pl-6 pr-14 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 shadow-lg disabled:opacity-50 resize-none overflow-hidden max-h-[140px] overflow-y-auto block leading-normal"
-                    style={{ minHeight: '58px' }} // Altura mínima consistente
+                    style={{ minHeight: '58px' }}
                   />
                   <button 
                     type="submit" 

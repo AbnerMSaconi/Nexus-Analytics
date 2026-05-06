@@ -141,7 +141,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, onLogout, userRole }) 
         )}
 
         {/* Botão Admin - Grená UCDB */}
-        {userRole === 'administrador' && (
+        {['administrador', 'coordenador'].includes(userRole || '') && (
           <button 
             onClick={() => navigate('/admin')} 
             className={getBtnClass('/admin', 'bg-[#990000]')}
