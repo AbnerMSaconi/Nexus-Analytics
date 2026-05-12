@@ -6,11 +6,11 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - C:/Users/andre/.cache/llama.cpp:/models # Mapeia o cache local para o diretório de modelos do container
+      - D:/models:/models
     environment:
       - CUDA_VISIBLE_DEVICES=0
     command: >
-      -m /models/qwen2.5-3b-instruct-q4_k_m.gguf
+      -m /models/Hermes-3-Llama-3.1-8B.Q4_K_M.gguf
       --port 8080
       --host 0.0.0.0
       -ngl 99
@@ -19,7 +19,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 6GB
+          memory: 8GB
         reservations:
           devices:
             - driver: nvidia
@@ -33,7 +33,7 @@ services:
     ports:
       - "8081:8081"
     volumes:
-      - C:/Users/andre/.cache/llama.cpp:/models # Mapeia o cache local para o diretório de modelos do container
+      - D:/models:/models
     environment:
       - CUDA_VISIBLE_DEVICES=0
     command: >

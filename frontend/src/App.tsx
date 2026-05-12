@@ -4,7 +4,8 @@ import { Layout } from './components/Layout';
 import { Login } from './components/Login';
 import { ChatInterface } from './components/ChatInterface';
 import { DocumentManager } from './components/DocumentManager';
-import { AdminPanel } from './components/AdminPanel'; // Importe o novo componente
+import { AdminPanel } from './components/AdminPanel';
+import { DashboardDAC } from './components/DashboardDAC';
 import type { AuthState, User } from './types';
 
 export default function App() {
@@ -44,11 +45,12 @@ export default function App() {
             
             <Route path="/documents" element={<DocumentManager />} />
 
+            <Route path="/dashboard" element={<DashboardDAC />} />
+
             {/* --- NOVA ROTA DE ADMIN --- */}
             {['administrador', 'coordenador'].includes(auth.user.role || '') ? (
                <Route path="/admin" element={<AdminPanel />} />
             ) : (
-               // Se não for admin e tentar acessar, joga pro chat
                <Route path="/admin" element={<Navigate to="/chat" replace />} />
             )}
 

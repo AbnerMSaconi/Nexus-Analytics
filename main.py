@@ -11,10 +11,12 @@ from contextlib import asynccontextmanager
 
 # Imports do projeto
 from app.api.routes import router
+from app.dac.routes import dac_router
 from app.core.config import settings
 from app.core.database import Base, engine
 from app.utils.logger import logger, setup_logging
 from app.api import models
+from app.dac import models as dac_models  # registra tabelas DAC no metadata
 
 # Inicialização do Banco
 try:
@@ -68,6 +70,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 # Montagem das rotas
 app.include_router(router)
+app.include_router(dac_router)
 
 # Servir arquivos estáticos (PDFs e fotos)
 os.makedirs(settings.static_path, exist_ok=True)

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { LogOut, MessageSquare, FolderOpen, Shield, Users } from 'lucide-react';
+import { LogOut, MessageSquare, FolderOpen, Shield, Users, BarChart2 } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import logoSmall from '../assets/ucdb-ia2-removebg-preview.png'; // Logo secundário
 
@@ -127,6 +127,15 @@ export const Layout: React.FC<LayoutProps> = ({ children, onLogout, userRole }) 
           title="Chat"
         >
           <MessageSquare className="w-6 h-6" />
+        </button>
+
+        {/* Botão Dashboard DAC */}
+        <button
+          onClick={() => navigate('/dashboard')}
+          className={getBtnClass('/dashboard', 'bg-emerald-700')}
+          title="Dashboard Educação MS"
+        >
+          <BarChart2 className="w-6 h-6" />
         </button>
 
         {/* Botão Documentos */}

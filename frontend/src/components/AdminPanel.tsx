@@ -1,8 +1,8 @@
 // frontend/src/components/AdminPanel.tsx
 import React, { useEffect, useState } from 'react';
-// Importe o ícone Edit e X (para fechar o modal)
 import { Shield, Unlock, UserX, CheckCircle, AlertTriangle, Save, Trash2, Edit, X } from 'lucide-react';
 import { api } from '../assets/api';
+import { SystemStatus } from './SystemStatus';
 
 // COMPONENTE INTERNO PARA A LINHA DA TABELA
 const UserRow = ({ user, token, onUpdate, onEditClick }: { user: any, token: string, onUpdate: () => void, onEditClick: (u: any) => void }) => {
@@ -200,7 +200,12 @@ export const AdminPanel: React.FC = () => {
   };
 
   return (
-    <div className="p-8 h-full overflow-y-auto bg-slate-950 text-white relative">
+    <div className="flex h-full bg-slate-950 text-white overflow-hidden">
+    {/* Painel de Status lateral */}
+    <div className="w-72 shrink-0 border-r border-slate-800 overflow-y-auto bg-slate-900/30">
+      <SystemStatus />
+    </div>
+    <div className="p-8 flex-1 overflow-y-auto relative">
       <div className="flex items-center justify-between mb-8">
         <div className="flex items-center gap-3">
             <div className="p-3 bg-red-500/10 rounded-xl border border-red-500/20">
@@ -355,6 +360,7 @@ export const AdminPanel: React.FC = () => {
         </div>
       )}
 
+    </div>
     </div>
   );
 };

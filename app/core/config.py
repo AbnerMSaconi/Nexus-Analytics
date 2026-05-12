@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     # SERVIÇOS (vLLM & Llama.cpp)
     LLM_BASE_URL: AnyHttpUrl = "http://localhost:8080/v1"
     EMBEDDING_API_URL: AnyHttpUrl = "http://localhost:8081/embedding"
-    MODEL_NAME: str = os.getenv("MODEL_NAME", "qwen2.5-3b-instruct")
+    MODEL_NAME: str = os.getenv("MODEL_NAME", "Hermes-3-Llama-3.1-8B.Q4_K_M.gguf")
     
     # PARÂMETROS DO MODELO
     MAX_TOKENS: int = 8192      

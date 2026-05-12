@@ -708,6 +708,77 @@ async def unblock_user(user_id: str, current_user: models.User = Depends(get_cur
     log_activity(db, current_user, "ADMIN_UNBLOCK", "INFO", f"Desbloqueou usuário {user_target.external_id}")
     return {"message": "Usuário desbloqueado"}
 
+
+# ── System Status ─────────────────────────────────────────────────────────────
+
+import httpx as _httpx
+import subprocess as _subprocess
+
+@router.get("/system/status")
+async def system_status():
+    """Retorna status dos serviços LLM, embedding e GPU."""
+    result = {
+        "llm": {"ok": False, "model": None, "n_ctx": None, "slots": None},
+        "embedding": {"ok": False, "model": None},
+        "gpu": [],
+    }
+
+    async with _httpx.AsyncClient(timeout=5.0) as client:
+        # LLM props
+        try:
+            r = await client.get(f"{str(settings.LLM_BASE_URL).rstrip('/v1')}/props")
+            if r.status_code == 200:
+                props = r.json()
+                result["llm"]["ok"] = True
+                result["llm"]["model"] = props.get("model_path", props.get("default_generation_settings", {}).get("model", "?"))
+                result["llm"]["n_ctx"] = props.get("default_generation_settings", {}).get("n_ctx")
+        except Exception:
+            pass
+
+        # LLM slots (processamento atual)
+        try:
+            r = await client.get(f"{str(settings.LLM_BASE_URL).rstrip('/v1')}/slots")
+            if r.status_code == 200:
+                slots = r.json()
+                processando = sum(1 for s in slots if s.get("state") == 1)
+                result["llm"]["slots"] = {"total": len(slots), "processando": processando}
+        except Exception:
+            pass
+
+        # Embedding props
+        try:
+            base_emb = str(settings.EMBEDDING_API_URL).replace("/embedding", "")
+            r = await client.get(f"{base_emb}/props")
+            if r.status_code == 200:
+                props = r.json()
+                result["embedding"]["ok"] = True
+                result["embedding"]["model"] = props.get("model_path", "?")
+        except Exception:
+            pass
+
+    # GPU via nvidia-smi
+    try:
+        out = _subprocess.check_output(
+            ["nvidia-smi",
+             "--query-gpu=index,name,utilization.gpu,memory.used,memory.total,temperature.gpu",
+             "--format=csv,noheader,nounits"],
+            timeout=5,
+        ).decode()
+        for line in out.strip().splitlines():
+            idx, name, util, mem_used, mem_total, temp = [x.strip() for x in line.split(",")]
+            result["gpu"].append({
+                "index": int(idx),
+                "name": name,
+                "utilizacao_pct": int(util),
+                "memoria_usada_mb": int(mem_used),
+                "memoria_total_mb": int(mem_total),
+                "temperatura_c": int(temp),
+            })
+    except Exception:
+        pass
+
+    return result
+
 @router.put("/admin/users/{user_id}")
 async def update_user_details(
     user_id: str,
