@@ -2,8 +2,6 @@ import { useState } from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { Login } from './components/Login';
-import { ChatInterface } from './components/ChatInterface';
-import { DocumentManager } from './components/DocumentManager';
 import { AdminPanel } from './components/AdminPanel';
 import { DashboardDAC } from './components/DashboardDAC';
 import type { AuthState, User } from './types';
@@ -36,24 +34,16 @@ export default function App() {
       {!auth.isAuthenticated || !auth.user ? (
         <Login onLogin={handleLogin} />
       ) : (
-        // Passamos a role para o Layout saber quais botões mostrar
         <Layout onLogout={handleLogout} userRole={auth.user.role}>
           <Routes>
-            <Route path="/" element={<Navigate to="/chat" replace />} />
-            
-            <Route path="/chat" element={<ChatInterface user={auth.user} />} />
-            
-            <Route path="/documents" element={<DocumentManager />} />
-
+            <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={<DashboardDAC />} />
-
-            {/* --- NOVA ROTA DE ADMIN --- */}
-            {['administrador', 'coordenador'].includes(auth.user.role || '') ? (
-               <Route path="/admin" element={<AdminPanel />} />
+            {auth.user.role === 'administrador' ? (
+              <Route path="/admin" element={<AdminPanel />} />
             ) : (
-               <Route path="/admin" element={<Navigate to="/chat" replace />} />
+              <Route path="/admin" element={<Navigate to="/dashboard" replace />} />
             )}
-
+            <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>
         </Layout>
       )}

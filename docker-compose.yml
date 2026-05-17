@@ -61,16 +61,13 @@ services:
   # Backend FastAPI - OTIMIZADO (Limite 1GB)
   backend:
     build:
-      context: .
-      dockerfile: Dockerfile.backend
+      context: ./backend
+      dockerfile: Dockerfile
     container_name: ucdb-backend
     ports:
       - "8000:8000"
     volumes:
-      - .:/app
-      - ./pdfs:/app/pdfs
-      - ./embeddings:/app/embeddings
-      - ./static:/app/static
+      - ./backend:/app
     environment:
       - SECRET_KEY=${SECRET_KEY:-chave_super_secreta_padrao}
       - LLM_BASE_URL=http://llm:8080/v1
@@ -104,7 +101,3 @@ services:
         limits:
           memory: 512MB
 
-volumes:
-  pdfs:
-  embeddings:
-  static:

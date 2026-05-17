@@ -1,51 +1,62 @@
-# Python
+# ── Python ────────────────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-share/python-wheels/
+*.egg
 *.egg-info/
 .installed.cfg
-*.egg
 MANIFEST
 
-# Virtual Environment
+# ── Ambientes virtuais ────────────────────────────────────────────────────────
 venv/
 env/
 ENV/
 .venv/
 .python-version
 
-# FastAPI / Uvicorn
-.uvicorn*
+# ── Node / Frontend ───────────────────────────────────────────────────────────
+node_modules/
+frontend/dist/
+frontend/.next/
+
+# ── Build / dist ──────────────────────────────────────────────────────────────
+build/
+dist/
+htmlcov/
+coverage/
+coverage.xml
+.tox/
+.nox/
+.mypy_cache/
+.pytest_cache/
+.hypothesis/
+
+# ── Banco de dados e runtime ──────────────────────────────────────────────────
+backend/ucdb_ia.db
+*.sqlite3
+backend/pdfs/
+backend/embeddings/
+backend/static/
+
+# ── Segredos e variáveis de ambiente ─────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+
+# ── Logs ─────────────────────────────────────────────────────────────────────
 *.log
 logs/
-*.sqlite3
+.uvicorn*
 
-# Sistema
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
-desktop.ini
+# ── Ferramentas locais de desenvolvimento ────────────────────────────────────
+.claude/
+mcp_server/
 
-# IDE
+# ── IDEs ──────────────────────────────────────────────────────────────────────
 .vscode/
 .idea/
 *.swp
@@ -53,46 +64,17 @@ desktop.ini
 *.sublime-project
 *.sublime-workspace
 
-# Arquivos de build
-htmlcov/
-.tox/
-.nox/
-coverage.xml
-coverage/
-*.cover
-*.py,cover
-.hypothesis/
-.mypy_cache/
-.pytest_cache/
-cover/
-build/
-dist/
-*.egg-info
+# ── Sistema operacional ───────────────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+desktop.ini
 
-# Embeddings e vetores
-embeddings/
-*.faiss
-*.pkl
-
-# Configuração
-.env
-.env.local
-.env.development
-.env.production
-.env.staging
-
-# Navegador
-*.html~
-*.css~
-*.js~
-
-# Sistema de arquivos temporários
+# ── Temporários ───────────────────────────────────────────────────────────────
 *.tmp
 *.temp
-
-
-pdfs/
-.aider.tags.cache.v4/
-node_modules/
-.aider.*
-ucdb_ia.db
+*.faiss
+*.pkl

@@ -1,6 +1,0 @@
-# .aiderignore
-node_modules/
-__pycache__/
-*.log
-.env
-dist/
