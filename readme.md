@@ -18,6 +18,19 @@ Alinhada à **ODS 4 — Educação de Qualidade** da Agenda 2030, a plataforma a
 
 ---
 
+## Capturas de Tela
+
+**Dashboard — evolução histórica e chat analítico**
+![Dashboard linha](docs/fi_dashboard_linhas.png)
+
+**Dashboard — comparativo por ano com destaque para 2024**
+![Dashboard barras](docs/fig_dashboard_barras.png)
+
+**Painel administrativo — status dos serviços e monitoramento de GPU**
+![Painel admin](docs/fig_admin.png)
+
+---
+
 ## Arquitetura
 
 ```
