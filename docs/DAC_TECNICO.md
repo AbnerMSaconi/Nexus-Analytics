@@ -176,7 +176,7 @@ Estado geral do banco DAC.
 ```json
 {
   "total_escolas": 599,
-  "total_registros": 4193,
+  "total_registros": 3703,
   "anos_disponiveis": [2018, 2019, 2020, 2021, 2022, 2023, 2024],
   "importado": true
 }
