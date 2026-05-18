@@ -208,13 +208,25 @@ class SerieHistorica:
             m = self.municipios.get(municipio)
             if m:
                 linhas.append(f"## Evolução histórica: {municipio}")
-                for d in m.evolucao(self.anos_disponiveis()):
+                evolucao_m = m.evolucao(self.anos_disponiveis())
+                for d in evolucao_m:
                     linhas.append(
                         f"- {d['ano']}: {d['total_matriculas']:,} matrículas | "
-                        f"Aprovação: {d['taxa_aprovacao']}% | "
-                        f"Reprovação: {d['taxa_reprovacao']}% | "
-                        f"Abandono: {d['taxa_abandono']}%"
+                        f"Aprovados: {d['aprovados']:,} ({d['taxa_aprovacao']}%) | "
+                        f"Reprovados: {d['reprovados']:,} ({d['taxa_reprovacao']}%) | "
+                        f"Abandono: {d['abandono']:,} ({d['taxa_abandono']}%)"
                     )
+                if evolucao_m:
+                    total_mat  = sum(d['total_matriculas'] for d in evolucao_m)
+                    total_ap   = sum(d['aprovados']        for d in evolucao_m)
+                    total_rep  = sum(d['reprovados']        for d in evolucao_m)
+                    total_ab   = sum(d['abandono']          for d in evolucao_m)
+                    base_total = total_ap + total_rep + total_ab
+                    linhas.append(f"\n## Totais acumulados — {municipio}")
+                    linhas.append(f"- Matrículas totais: {total_mat:,}")
+                    linhas.append(f"- Aprovados totais: {total_ap:,} ({round(total_ap/base_total*100,2) if base_total else 0}%)")
+                    linhas.append(f"- Reprovados totais: {total_rep:,} ({round(total_rep/base_total*100,2) if base_total else 0}%)")
+                    linhas.append(f"- Abandono total: {total_ab:,} ({round(total_ab/base_total*100,2) if base_total else 0}%)")
         elif ano:
             linhas.append(f"## Todos os municípios — {ano}")
             municipios_ano = []
@@ -231,12 +243,28 @@ class SerieHistorica:
                     f"Abandono: {r['taxa_abandono']}%"
                 )
         else:
-            linhas.append("## Evolução do Estado (2018-2026)")
-            for d in self.evolucao_estado():
+            evolucao = self.evolucao_estado()
+            linhas.append("## Evolução do Estado (dados por ano)")
+            for d in evolucao:
                 linhas.append(
                     f"- {d['ano']}: {d['total_matriculas']:,} matrículas | "
-                    f"Aprovação: {d['taxa_aprovacao']}% | Abandono: {d['taxa_abandono']}% | "
-                    f"Reprovação: {d['taxa_reprovacao']}%"
+                    f"Aprovados: {d['aprovados']:,} ({d['taxa_aprovacao']}%) | "
+                    f"Reprovados: {d['reprovados']:,} ({d['taxa_reprovacao']}%) | "
+                    f"Abandono: {d['abandono']:,} ({d['taxa_abandono']}%)"
                 )
+
+            # Totais pré-calculados para evitar erros aritméticos do LLM
+            if evolucao:
+                total_mat  = sum(d['total_matriculas'] for d in evolucao)
+                total_ap   = sum(d['aprovados']        for d in evolucao)
+                total_rep  = sum(d['reprovados']        for d in evolucao)
+                total_ab   = sum(d['abandono']          for d in evolucao)
+                base_total = total_ap + total_rep + total_ab
+                linhas.append("\n## Totais acumulados do período")
+                linhas.append(f"- Matrículas totais: {total_mat:,}")
+                linhas.append(f"- Aprovados totais: {total_ap:,} ({round(total_ap/base_total*100,2) if base_total else 0}%)")
+                linhas.append(f"- Reprovados totais: {total_rep:,} ({round(total_rep/base_total*100,2) if base_total else 0}%)")
+                linhas.append(f"- Abandono total: {total_ab:,} ({round(total_ab/base_total*100,2) if base_total else 0}%)")
+                linhas.append(f"  (base de cálculo das taxas: aprovados + reprovados + abandono = {base_total:,})")
 
         return "\n".join(linhas)

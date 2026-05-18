@@ -23,10 +23,48 @@ Dados/
 
 ---
 
+## Diagrama Entidade-Relacionamento
+
+```mermaid
+erDiagram
+    dac_escolas {
+        string id PK "UUID"
+        string nome "NOT NULL"
+        string municipio "NOT NULL, INDEX"
+    }
+
+    dac_dados_escolares {
+        string id PK "UUID"
+        string escola_id FK "NOT NULL, INDEX"
+        int ano "NOT NULL, INDEX"
+        int total_matriculas
+        int matricula_inicial
+        int matricula_apos_censo
+        int transferidos
+        int cancelados
+        int falecido
+        int abandono
+        int aprovados
+        int reprovados
+        int cursando
+        int outras_situacoes
+    }
+
+    dac_escolas ||--o{ dac_dados_escolares : "1 escola → N anos"
+```
+
+**Constraints de unicidade:**
+- `dac_escolas`: `UNIQUE(nome, municipio)` — impede cadastro duplicado de escolas
+- `dac_dados_escolares`: `UNIQUE(escola_id, ano)` — garante idempotência nas reimportações
+
+> As taxas de aprovação, reprovação e abandono **não são armazenadas** no banco — são calculadas dinamicamente pela camada de domínio (`classes.py`) ou nas queries agregadas dos endpoints.
+
+---
+
 ## Modelos de Banco de Dados
 
 ### `DacEscola`
-Representa uma unidade escolar única (nome + município).
+Representa uma unidade escolar única identificada pelo par nome + município.
 
 | Campo | Tipo | Descrição |
 |---|---|---|
@@ -34,15 +72,15 @@ Representa uma unidade escolar única (nome + município).
 | `nome` | String | Nome da unidade escolar |
 | `municipio` | String | Município (indexado) |
 
-Constraint única: `(nome, municipio)`.
+Constraint única: `UNIQUE(nome, municipio)`.
 
 ### `DacDadosEscolares`
-Dados anuais de uma escola. Um registro por escola por ano.
+Contadores brutos de situação dos alunos ao encerramento do ano letivo. Um registro por escola por ano.
 
 | Campo | Tipo | Descrição |
 |---|---|---|
 | `id` | String (UUID) | Chave primária |
-| `escola_id` | FK → DacEscola | Escola referenciada |
+| `escola_id` | FK → dac_escolas | Escola referenciada (indexado) |
 | `ano` | Integer | Ano de referência (indexado) |
 | `total_matriculas` | Integer | Total de matrículas |
 | `matricula_inicial` | Integer | Matrículas no início do ano |
@@ -53,13 +91,10 @@ Dados anuais de uma escola. Um registro por escola por ano.
 | `abandono` | Integer | Abandono escolar |
 | `aprovados` | Integer | Alunos aprovados |
 | `reprovados` | Integer | Alunos reprovados |
-| `cursando` | Integer | Ainda cursando (sem resultado) |
+| `cursando` | Integer | Ainda cursando (sem resultado final) |
 | `outras_situacoes` | Integer | Outras situações |
-| `taxa_aprovacao` | Float | % aprovação (calculado no import) |
-| `taxa_abandono` | Float | % abandono |
-| `taxa_reprovacao` | Float | % reprovação |
 
-Constraint única: `(escola_id, ano)`.
+Constraint única: `UNIQUE(escola_id, ano)`.
 
 ---
 
@@ -129,9 +164,9 @@ Importa um arquivo CSV para o banco.
   "status": "ok",
   "arquivo": "matriculas-por-unidade-escolar-2021.csv",
   "ano": 2021,
-  "registros_inseridos": 4823,
+  "registros_inseridos": 598,
   "registros_ignorados": 0,
-  "escolas_novas": 1247
+  "escolas_novas": 12
 }
 ```
 
@@ -140,8 +175,8 @@ Estado geral do banco DAC.
 
 ```json
 {
-  "total_escolas": 1247,
-  "total_registros": 9846,
+  "total_escolas": 599,
+  "total_registros": 4193,
   "anos_disponiveis": [2018, 2019, 2020, 2021, 2022, 2023, 2024],
   "importado": true
 }

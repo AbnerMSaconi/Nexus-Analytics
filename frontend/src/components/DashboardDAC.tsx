@@ -7,8 +7,10 @@ import {
   BarChart2, Bot, Send, RefreshCw, Upload, AlertTriangle,
   Database, Trash2,
 } from 'lucide-react';
+import { MarkdownMessage } from './MarkdownMessage';
+import { API_BASE } from '../utils/apiBase';
 
-const API = (path: string) => `http://localhost:8000${path}`;
+const API = (path: string) => `${API_BASE}${path}`;
 
 const PALETTE = [
   '#3b82f6', '#22c55e', '#ef4444', '#f59e0b',
@@ -84,13 +86,28 @@ export const DashboardDAC: React.FC = () => {
   const [msgs, setMsgs]             = useState<ChatMsg[]>([]);
   const [input, setInput]           = useState('');
   const [streamingAI, setStreamingAI] = useState('');
+  const [aiPhase, setAiPhase]         = useState<'idle' | 'waiting' | 'thinking' | 'streaming'>('idle');
+  const [thinkingMode, setThinkingMode] = useState(false);
+  const [chatOpen, setChatOpen]       = useState(false);
+  const [chatVisible, setChatVisible] = useState(false);
   const chatRef = useRef<HTMLDivElement>(null);
+
+  const openChat = () => {
+    setChatVisible(true);
+    setChatOpen(true);
+  };
+
+  const closeChat = () => {
+    setChatOpen(false);
+    setTimeout(() => setChatVisible(false), 620);
+  };
 
   useEffect(() => { loadAll(); }, []);
 
   useEffect(() => {
     if (chatRef.current) chatRef.current.scrollTop = chatRef.current.scrollHeight;
-  }, [msgs, streamingAI]);
+  }, [msgs, streamingAI, aiPhase]);
+
 
   useEffect(() => { fetchDashboard(); }, [anoInicio, anoFim, municipioSel]);
 
@@ -197,6 +214,9 @@ export const DashboardDAC: React.FC = () => {
     setInput('');
     setMsgs(prev => [...prev, { role: 'user', content: msg }]);
     setStreamingAI('');
+    setAiPhase('waiting');
+
+    const history = msgs.slice(-8).map(m => ({ role: m.role, content: m.content }));
 
     const res = await fetch(API('/dac/chat'), {
       method: 'POST',
@@ -206,9 +226,11 @@ export const DashboardDAC: React.FC = () => {
         municipio: municipioSel || null,
         ano_inicio: anoInicio ? parseInt(anoInicio) : null,
         ano_fim:    anoFim    ? parseInt(anoFim)    : null,
+        history,
+        thinking_mode: thinkingMode,
       }),
     });
-    if (!res.body) return;
+    if (!res.body) { setAiPhase('idle'); return; }
 
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
@@ -220,8 +242,25 @@ export const DashboardDAC: React.FC = () => {
         if (!line.startsWith('data: ')) continue;
         try {
           const ev = JSON.parse(line.slice(6));
-          if (ev.type === 'chunk') { accumulated += ev.content; setStreamingAI(accumulated); }
-          else if (ev.type === 'complete') { setMsgs(p => [...p, { role: 'ai', content: accumulated }]); setStreamingAI(''); }
+          if (ev.type === 'chunk') {
+            accumulated += ev.content;
+            const inThink = accumulated.includes('<think>') && !accumulated.includes('</think>');
+            if (inThink) {
+              setAiPhase('thinking');
+              setStreamingAI('');
+            } else {
+              const visible = accumulated.replace(/<think>[\s\S]*?<\/think>/g, '').trimStart();
+              if (visible) {
+                setAiPhase('streaming');
+                setStreamingAI(visible);
+              }
+            }
+          } else if (ev.type === 'complete') {
+            const final = accumulated.replace(/<think>[\s\S]*?<\/think>/g, '').trimStart();
+            setMsgs(p => [...p, { role: 'ai', content: final }]);
+            setStreamingAI('');
+            setAiPhase('idle');
+          }
         } catch {}
       }
     }
@@ -253,7 +292,7 @@ export const DashboardDAC: React.FC = () => {
   return (
     <div className="flex h-full bg-[#020617] text-white overflow-hidden">
 
-      {/* ── Painel Principal ── */}
+      {/* ── Painel Principal (ocupa tudo agora) ── */}
       <div className="flex-1 flex flex-col overflow-hidden">
 
         {/* Header */}
@@ -530,65 +569,180 @@ export const DashboardDAC: React.FC = () => {
         </div>
       </div>
 
-      {/* ── Chat Analítico ── */}
-      <div className="w-96 flex flex-col border-l border-slate-800 bg-slate-900/40">
-        <div className="px-4 py-3 border-b border-slate-800 flex items-center gap-2 shrink-0">
-          <Bot className="w-5 h-5 text-blue-400" />
-          <div>
-            <p className="text-sm font-semibold">Nexus IA</p>
-            <p className="text-xs text-slate-500 truncate max-w-[200px]">{filtrosDesc}</p>
-          </div>
-        </div>
+      {/* ── Painel lateral ── */}
+      <div
+        className="shrink-0 overflow-hidden"
+        style={{
+          width: chatOpen ? '24rem' : '0px',
+          transition: 'width 600ms cubic-bezier(0.16,1,0.3,1)',
+        }}
+      >
+        <div
+          className="w-96 h-full flex flex-col border-l border-slate-800 bg-slate-900/40"
+          style={{
+            transform: chatOpen ? 'translateY(0)' : 'translateY(100%)',
+            transition: 'transform 600ms cubic-bezier(0.16,1,0.3,1)',
+            pointerEvents: chatOpen ? 'auto' : 'none',
+          }}
+        >
 
-        <div ref={chatRef} className="flex-1 overflow-y-auto p-4 space-y-3">
-          {msgs.length === 0 && !streamingAI && (
-            <div className="text-center text-slate-600 text-sm mt-8 space-y-2">
-              <Bot className="w-10 h-10 mx-auto text-slate-700" />
-              <p>Pergunte sobre os dados educacionais.</p>
-              <p className="text-xs">Ex: "Qual foi a taxa de abandono em 2022?" ou "Compare aprovação e reprovação ao longo dos anos."</p>
-              {!temDados && <p className="text-yellow-600 text-xs mt-2">Importe os CSVs para começar.</p>}
+          {/* Header */}
+          <div
+            onClick={() => closeChat()}
+            className="px-4 py-3 border-b border-slate-800 flex items-center justify-between shrink-0 cursor-pointer hover:bg-slate-800/50 transition-colors select-none"
+          >
+            <div className="flex items-center gap-2">
+              <Bot className="w-4 h-4 text-blue-400 shrink-0" />
+              <span className="text-sm font-semibold">Assistente Nexus IA</span>
             </div>
-          )}
-
-          {msgs.map((m, i) => (
-            <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div
-                className={`max-w-[85%] rounded-xl px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap ${
-                  m.role === 'user' ? 'bg-blue-700 text-white' : 'bg-slate-800 text-slate-200'
+            <div className="flex items-center gap-2">
+              <button
+                onClick={e => { e.stopPropagation(); setThinkingMode(v => !v); }}
+                title={thinkingMode ? 'Raciocínio ativo' : 'Raciocínio desativado'}
+                className={`flex items-center gap-1.5 px-2 py-1 rounded-md border text-xs font-medium transition-all ${
+                  thinkingMode
+                    ? 'bg-violet-900/50 border-violet-600 text-violet-300'
+                    : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-600'
                 }`}
               >
-                {m.content}
-              </div>
+                <i className="fi fi-ts-chip-brain leading-none" style={{ fontSize: '13px' }} />
+                <span className={`relative inline-flex w-6 h-3.5 rounded-full transition-colors ${thinkingMode ? 'bg-violet-500' : 'bg-slate-500'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-2.5 h-2.5 bg-white rounded-full shadow transition-transform ${thinkingMode ? 'translate-x-2.5' : 'translate-x-0'}`} />
+                </span>
+              </button>
+              <svg
+                className="w-4 h-4 text-slate-400 transition-transform duration-300"
+                style={{ transform: chatOpen ? 'rotate(0deg)' : 'rotate(180deg)' }}
+                viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}
+              >
+                <path d="M6 9l6 6 6-6" />
+              </svg>
             </div>
-          ))}
+          </div>
 
-          {streamingAI && (
-            <div className="flex justify-start">
-              <div className="max-w-[85%] rounded-xl px-3 py-2 text-sm bg-slate-800 text-slate-200 leading-relaxed whitespace-pre-wrap">
-                {streamingAI}
-                <span className="inline-block w-1.5 h-4 bg-blue-400 ml-1 animate-pulse align-middle" />
+          {/* Mensagens */}
+          <div ref={chatRef} className="flex-1 overflow-y-auto p-4 space-y-3">
+            {msgs.length === 0 && aiPhase === 'idle' && (
+              <div className="text-center text-slate-600 text-sm mt-8 space-y-2">
+                <Bot className="w-10 h-10 mx-auto text-slate-700" />
+                <p>Pergunte sobre os dados educacionais.</p>
+                <p className="text-xs">Ex: "Taxa de reprovação em 2024?" ou "Compare aprovação ao longo dos anos."</p>
+                {!temDados && <p className="text-yellow-600 text-xs mt-2">Importe os CSVs para começar.</p>}
               </div>
+            )}
+            {msgs.map((m, i) => (
+              <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                {m.role === 'user' ? (
+                  <div className="max-w-[85%] rounded-xl px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap bg-blue-700 text-white">
+                    {m.content}
+                  </div>
+                ) : (
+                  <div className="max-w-[90%] rounded-xl px-3 py-2 bg-slate-800">
+                    <MarkdownMessage content={m.content} />
+                  </div>
+                )}
+              </div>
+            ))}
+            {/* Aguardando primeira resposta do servidor */}
+            {aiPhase === 'waiting' && (
+              <div className="flex justify-start">
+                <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-800 text-slate-400 text-sm">
+                  <span className="flex gap-1">
+                    {[0, 150, 300].map(d => (
+                      <span key={d} className="w-1.5 h-1.5 rounded-full bg-slate-500 animate-bounce"
+                        style={{ animationDelay: `${d}ms` }} />
+                    ))}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* Bloco <think> sendo gerado */}
+            {aiPhase === 'thinking' && (
+              <div className="flex justify-start">
+                <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-violet-950/60 border border-violet-800/40 text-violet-300 text-sm">
+                  <i className="fi fi-ts-chip-brain text-base leading-none animate-pulse" />
+                  <span className="font-medium">Raciocínando</span>
+                  <span className="flex gap-1">
+                    {[0, 200, 400].map(d => (
+                      <span key={d} className="w-1 h-1 rounded-full bg-violet-400 animate-bounce"
+                        style={{ animationDelay: `${d}ms` }} />
+                    ))}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* Resposta sendo transmitida */}
+            {aiPhase === 'streaming' && streamingAI && (
+              <div className="flex justify-start">
+                <div className="max-w-[90%] rounded-xl px-3 py-2 bg-slate-800 text-slate-300 text-sm leading-relaxed whitespace-pre-wrap">
+                  {streamingAI}
+                  <span className="inline-block w-1.5 h-4 bg-blue-400 ml-1 animate-pulse align-middle" />
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Input */}
+          <div className="p-3 border-t border-slate-800 shrink-0">
+            <div className="flex gap-2">
+              <input
+                value={input}
+                onChange={e => setInput(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && !e.shiftKey && aiPhase === 'idle' && enviarChat()}
+                placeholder={aiPhase !== 'idle' ? 'Aguardando resposta…' : 'Pergunte sobre os dados…'}
+                disabled={aiPhase !== 'idle'}
+                className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-600 disabled:opacity-50"
+              />
+              <button
+                onClick={enviarChat}
+                disabled={!input.trim() || aiPhase !== 'idle'}
+                className="p-2 rounded-lg bg-blue-700 hover:bg-blue-600 disabled:opacity-40 transition-colors"
+              >
+                <Send className="w-4 h-4" />
+              </button>
             </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Barra flutuante (sempre no DOM, anima translateY) ── */}
+      <div
+        onClick={() => openChat()}
+        className="fixed bottom-0 right-6 z-50 flex items-center justify-between px-4 py-2.5 bg-slate-800 border border-slate-700 border-b-0 rounded-t-xl cursor-pointer hover:bg-slate-700 transition-colors select-none shadow-xl"
+        style={{
+          width: '22rem',
+          transform: chatOpen ? 'translateY(110%)' : 'translateY(0)',
+          transition: 'transform 600ms cubic-bezier(0.16,1,0.3,1)',
+          pointerEvents: chatOpen ? 'none' : 'auto',
+        }}
+      >
+        <div className="flex items-center gap-2">
+          <Bot className="w-4 h-4 text-blue-400 shrink-0" />
+          <span className="text-sm font-semibold text-white">Assistente Nexus IA</span>
+          {msgs.length > 0 && (
+            <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse" />
           )}
         </div>
-
-        <div className="p-3 border-t border-slate-800 shrink-0">
-          <div className="flex gap-2">
-            <input
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && !e.shiftKey && enviarChat()}
-              placeholder="Pergunte sobre os dados…"
-              className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-600"
-            />
-            <button
-              onClick={enviarChat}
-              disabled={!input.trim()}
-              className="p-2 rounded-lg bg-blue-700 hover:bg-blue-600 disabled:opacity-40 transition-colors"
-            >
-              <Send className="w-4 h-4" />
-            </button>
-          </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={e => { e.stopPropagation(); setThinkingMode(v => !v); }}
+            title={thinkingMode ? 'Raciocínio ativo' : 'Raciocínio desativado'}
+            className={`flex items-center gap-1.5 px-2 py-1 rounded-md border text-xs font-medium transition-all ${
+              thinkingMode
+                ? 'bg-violet-900/50 border-violet-600 text-violet-300'
+                : 'bg-slate-700 border-slate-600 text-slate-400 hover:border-slate-500'
+            }`}
+          >
+            <i className="fi fi-ts-chip-brain leading-none" style={{ fontSize: '13px' }} />
+            <span className={`relative inline-flex w-6 h-3.5 rounded-full transition-colors ${thinkingMode ? 'bg-violet-500' : 'bg-slate-500'}`}>
+              <span className={`absolute top-0.5 left-0.5 w-2.5 h-2.5 bg-white rounded-full shadow transition-transform ${thinkingMode ? 'translate-x-2.5' : 'translate-x-0'}`} />
+            </span>
+          </button>
+          <svg className="w-4 h-4 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+            <path d="M18 15l-6-6-6 6" />
+          </svg>
         </div>
       </div>
     </div>

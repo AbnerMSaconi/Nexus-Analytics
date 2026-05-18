@@ -1,5 +1,13 @@
 // frontend/src/assets/api.ts
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+import { API_BASE as API_URL } from '../utils/apiBase';
+
+function handleUnauthorized(res: Response) {
+  if (res.status === 401) {
+    localStorage.removeItem('nexus_token');
+    localStorage.removeItem('nexus_user');
+    window.location.hash = '#/login';
+  }
+}
 
 export const api = {
   // Chat com streaming
@@ -47,6 +55,7 @@ export const api = {
     const res = await fetch(`${API_URL}/admin/users`, {
       headers: { 'Authorization': `Bearer ${token}` }
     });
+    handleUnauthorized(res);
     if (!res.ok) throw new Error('Falha ao buscar usuários');
     return res.json();
   },
@@ -60,7 +69,7 @@ export const api = {
       },
       body: JSON.stringify(userData)
     });
-
+    handleUnauthorized(res);
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.detail || 'Falha ao criar usuário');

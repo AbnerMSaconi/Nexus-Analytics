@@ -1,10 +1,36 @@
 import { useState } from 'react';
-import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { HashRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { Login } from './components/Login';
 import { AdminPanel } from './components/AdminPanel';
 import { DashboardDAC } from './components/DashboardDAC';
 import type { AuthState, User } from './types';
+
+function AppRoutes({ userRole }: { userRole: string }) {
+  const location = useLocation();
+  const isDashboard = location.pathname === '/dashboard' || location.pathname === '/';
+  const isAdmin = location.pathname === '/admin';
+
+  return (
+    <>
+      {/* DashboardDAC sempre montado — só escondido via CSS fora da rota */}
+      <div className={isDashboard ? 'h-full overflow-hidden' : 'hidden'}>
+        <DashboardDAC />
+      </div>
+
+      {userRole === 'administrador' && isAdmin && <AdminPanel />}
+
+      <Routes>
+        <Route path="/" element={<Navigate to="/dashboard" replace />} />
+        <Route path="/dashboard" element={null} />
+        <Route path="/admin" element={
+          userRole === 'administrador' ? null : <Navigate to="/dashboard" replace />
+        } />
+        <Route path="*" element={<Navigate to="/dashboard" replace />} />
+      </Routes>
+    </>
+  );
+}
 
 export default function App() {
   const [auth, setAuth] = useState<AuthState>(() => {
@@ -35,16 +61,7 @@ export default function App() {
         <Login onLogin={handleLogin} />
       ) : (
         <Layout onLogout={handleLogout} userRole={auth.user.role}>
-          <Routes>
-            <Route path="/" element={<Navigate to="/dashboard" replace />} />
-            <Route path="/dashboard" element={<DashboardDAC />} />
-            {auth.user.role === 'administrador' ? (
-              <Route path="/admin" element={<AdminPanel />} />
-            ) : (
-              <Route path="/admin" element={<Navigate to="/dashboard" replace />} />
-            )}
-            <Route path="*" element={<Navigate to="/dashboard" replace />} />
-          </Routes>
+          <AppRoutes userRole={auth.user.role} />
         </Layout>
       )}
     </HashRouter>

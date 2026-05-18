@@ -679,7 +679,7 @@ async def get_rag_chain_async(area: str = "Geral"):
         return f"\n[RELAÇÕES ENCONTRADAS]: {graph_data}\n" if graph_data else ""
 
     # LLM Bindado com tokens de parada
-    llm = get_cached_llm().bind(stop=["Human:", "User:", "Question:", "System:", "<|im_end|>", "<|eot_id|>"])
+    llm = get_cached_llm().bind(stop=["Human:", "User:", "Question:", "System:", "<|im_end|>", "<|eot_id|>", "<|endoftext|>"])
 
     system_msg = _obter_prompt_persona(area)
 

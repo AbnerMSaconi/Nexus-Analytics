@@ -5,32 +5,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
     <meta http-equiv="Content-Security-Policy" content="
-      default-src 'self' http://localhost:8000;
-      script-src 'self' 'unsafe-eval' 'unsafe-inline' https://cdn.jsdelivr.net;
-      style-src 'self' 'unsafe-inline';
-      font-src 'self' https://cdn.jsdelivr.net;
-      connect-src 'self' http://localhost:8000 ws://localhost:8000 ws://127.0.0.1:8000 ws://localhost:5173 https://cdn.jsdelivr.net;
+      default-src 'self';
+      script-src 'self' 'unsafe-eval' 'unsafe-inline';
+      style-src 'self' 'unsafe-inline' https://cdn-uicons.flaticon.com;
+      font-src 'self' https://cdn-uicons.flaticon.com data:;
+      connect-src *;
     ">
 
     <title>Nexus</title>
+    <link rel="stylesheet" href="https://cdn-uicons.flaticon.com/3.0.0/uicons-thin-straight/css/uicons-thin-straight.css">
 
-    <script>
-      window.MathJax = {
-        tex: {
-          inlineMath: [['$', '$'], ['\\(', '\\)']],
-          displayMath: [['$$', '$$'], ['\\[', '\\]']],
-          processEscapes: true,
-          processEnvironments: true
-        },
-        options: {
-          skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code']
-        },
-        svg: {
-          fontCache: 'global'
-        }
-      };
-    </script>
-    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
   </head>
   <body>
     <div id="root"></div>

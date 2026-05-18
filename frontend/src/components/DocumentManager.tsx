@@ -101,12 +101,7 @@ export const DocumentManager: React.FC = () => {
 
     try {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const host = import.meta.env.VITE_API_URL ? import.meta.env.VITE_API_URL.replace(/^https?:\/\//, '') : window.location.host;
-      
-      // Se o host já contém o protocolo (devido a VITE_API_URL), removemos
-      const cleanHost = host.replace(/^https?:\/\//, '');
-      
-      const ws = new WebSocket(`${protocol}//${cleanHost}/ws/${userId}`);
+      const ws = new WebSocket(`${protocol}//${window.location.hostname}:8000/ws/${userId}`);
 
       ws.onopen = () => console.log("✅ WebSocket conectado");
       

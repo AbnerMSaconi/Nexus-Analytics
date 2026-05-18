@@ -1,12 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Cpu, Zap, Server, RefreshCw, CheckCircle, XCircle, Thermometer } from 'lucide-react';
 
-const API_BASE = () => {
-  const h = window.location.hostname;
-  return (h === 'localhost' || h === '127.0.0.1')
-    ? 'http://127.0.0.1:8000'
-    : `${window.location.protocol}//${h}:8000`;
-};
+import { API_BASE as _API_BASE } from '../utils/apiBase';
+const API_BASE = () => _API_BASE;
 
 interface GpuInfo {
   index: number;

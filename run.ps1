@@ -8,7 +8,7 @@ if (!(Get-Command docker -ErrorAction SilentlyContinue)) {
 # Aviso de GPU (nao bloqueia)
 $gpuOk = docker info 2>$null | Select-String "nvidia"
 if (!$gpuOk) {
-    Write-Host "[AVISO] NVIDIA runtime nao detectado — LLM pode rodar sem aceleracao por GPU." -ForegroundColor Yellow
+    Write-Host "[AVISO] NVIDIA runtime nao detectado - LLM pode rodar sem aceleracao por GPU." -ForegroundColor Yellow
 }
 
 # Build apenas se as imagens ainda nao existem

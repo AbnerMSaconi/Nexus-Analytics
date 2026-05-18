@@ -1,7 +1,6 @@
 import { api } from '../assets/api';
 
-// URL base do backend (ajuste se estiver rodando em outro IP)
-const BACKEND_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+import { API_BASE as BACKEND_URL } from '../utils/apiBase';
 
 export interface RAGResponse {
   text: string;

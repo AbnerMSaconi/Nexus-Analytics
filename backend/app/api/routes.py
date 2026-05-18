@@ -4,6 +4,12 @@ from typing import List
 import logging
 import httpx as _httpx
 import subprocess as _subprocess
+try:
+    import pynvml as _nvml
+    _nvml.nvmlInit()
+    _NVML_OK = True
+except Exception:
+    _NVML_OK = False
 
 from app.api import schemas, models
 from app.core import security
@@ -315,23 +321,26 @@ async def system_status():
         except Exception:
             pass
 
-    try:
-        out = _subprocess.check_output(
-            ["nvidia-smi",
-             "--query-gpu=index,name,utilization.gpu,memory.used,memory.total,temperature.gpu",
-             "--format=csv,noheader,nounits"],
-            timeout=5,
-        ).decode()
-        for line in out.strip().splitlines():
-            idx, name, util, mem_used, mem_total, temp = [x.strip() for x in line.split(",")]
-            result["gpu"].append({
-                "index": int(idx), "name": name,
-                "utilizacao_pct": int(util),
-                "memoria_usada_mb": int(mem_used),
-                "memoria_total_mb": int(mem_total),
-                "temperatura_c": int(temp),
-            })
-    except Exception:
-        pass
+    if _NVML_OK:
+        try:
+            count = _nvml.nvmlDeviceGetCount()
+            for i in range(count):
+                h = _nvml.nvmlDeviceGetHandleByIndex(i)
+                name = _nvml.nvmlDeviceGetName(h)
+                if isinstance(name, bytes):
+                    name = name.decode()
+                util  = _nvml.nvmlDeviceGetUtilizationRates(h)
+                mem   = _nvml.nvmlDeviceGetMemoryInfo(h)
+                temp  = _nvml.nvmlDeviceGetTemperature(h, _nvml.NVML_TEMPERATURE_GPU)
+                result["gpu"].append({
+                    "index": i,
+                    "name": name,
+                    "utilizacao_pct": util.gpu,
+                    "memoria_usada_mb": mem.used // (1024 * 1024),
+                    "memoria_total_mb": mem.total // (1024 * 1024),
+                    "temperatura_c": temp,
+                })
+        except Exception:
+            pass
 
     return result

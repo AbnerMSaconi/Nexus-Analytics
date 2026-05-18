@@ -1,21 +1,21 @@
 services:
-  # Servidor de LLM (Chat) - OTIMIZADO (Limite 4GB)
   llm:
     image: ghcr.io/ggml-org/llama.cpp:server-cuda
     container_name: ucdb-llm-server
     ports:
       - "8080:8080"
     volumes:
-      - D:/models:/models
+      - ${MODELS_DIR}:/models
     environment:
-      - CUDA_VISIBLE_DEVICES=0
+      - CUDA_VISIBLE_DEVICES=${CUDA_DEVICE:-0}
     command: >
-      -m /models/Hermes-3-Llama-3.1-8B.Q4_K_M.gguf
+      -m /models/${LLM_MODEL}
       --port 8080
       --host 0.0.0.0
       -ngl 99
-      -c 16384
-      --parallel 1
+      -c ${LLM_CONTEXT:-4096}
+      --parallel ${LLM_PARALLEL:-1}
+      --jinja
     deploy:
       resources:
         limits:
@@ -26,18 +26,17 @@ services:
               count: 1
               capabilities: [gpu]
 
-  # Servidor de Embedding (Busca) - OTIMIZADO (Limite 2GB)
   embeddings:
     image: ghcr.io/ggml-org/llama.cpp:server-cuda
     container_name: ucdb-embedding-server
     ports:
       - "8081:8081"
     volumes:
-      - D:/models:/models
+      - ${MODELS_DIR}:/models
     environment:
-      - CUDA_VISIBLE_DEVICES=0
+      - CUDA_VISIBLE_DEVICES=${CUDA_DEVICE:-0}
     command: >
-      -m /models/Qwen3-Embedding-0.6B-Q8_0.gguf
+      -m /models/${EMBEDDING_MODEL}
       --embedding
       --port 8081
       --host 0.0.0.0
@@ -58,7 +57,6 @@ services:
               count: 1
               capabilities: [gpu]
 
-  # Backend FastAPI - OTIMIZADO (Limite 1GB)
   backend:
     build:
       context: ./backend
@@ -69,10 +67,12 @@ services:
     volumes:
       - ./backend:/app
     environment:
-      - SECRET_KEY=${SECRET_KEY:-chave_super_secreta_padrao}
+      - SECRET_KEY=${SECRET_KEY}
       - LLM_BASE_URL=http://llm:8080/v1
       - EMBEDDING_API_URL=http://embeddings:8081/embedding
       - DATABASE_URL=sqlite:////app/ucdb_ia.db
+      - MODEL_NAME=${LLM_MODEL}
+      - CUDA_VISIBLE_DEVICES=${CUDA_DEVICE:-0}
     depends_on:
       - llm
       - embeddings
@@ -80,8 +80,12 @@ services:
       resources:
         limits:
           memory: 1GB
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
 
-  # Frontend React (Vite) - OTIMIZADO (Limite 512MB)
   frontend:
     build:
       context: ./frontend
@@ -92,12 +96,9 @@ services:
     volumes:
       - ./frontend:/app
       - /app/node_modules
-    environment:
-      - VITE_API_URL=http://localhost:8000
     depends_on:
       - backend
     deploy:
       resources:
         limits:
           memory: 512MB
-
