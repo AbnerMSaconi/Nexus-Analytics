@@ -1,0 +1,330 @@
+\documentclass[preprint,10pt,5p]{elsarticle}
+
+\usepackage{amssymb}
+\usepackage{lineno}
+\usepackage{amsmath}
+\usepackage{subcaption}
+\usepackage{hhline}
+\usepackage{hyperref}
+\usepackage{booktabs}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[brazil]{babel}
+
+\journal{Universidade Católica Dom Bosco}
+
+\begin{document}
+
+\begin{frontmatter}
+
+\title{Nexus: Sistema de Análise de Dados Educacionais com Suporte de Inteligência Artificial para Monitoramento da ODS~4 no Mato Grosso do Sul}
+
+\address[label1]{Universidade Católica Dom Bosco, Campo Grande, Brasil}
+
+\author[label1]{Abner Matheus Moraes Saconi}
+\ead{abnermatheusmoraes@gmail.com}
+
+\begin{abstract}
+O acompanhamento quantitativo dos indicadores educacionais da rede pública estadual do
+Mato Grosso do Sul constitui requisito indispensável para a verificação das metas do
+Objetivo de Desenvolvimento Sustentável número~4 (ODS~4) da Agenda 2030 das Nações Unidas.
+Os dados disponibilizados pela Secretaria de Estado de Educação encontram-se fragmentados em
+arquivos CSV anuais, inviabilizando análises históricas sem processamento especializado.
+Este trabalho descreve o desenvolvimento do Nexus, sistema web que consolida a importação,
+persistência e análise desses registros por meio de um módulo denominado DAC
+(\textit{Dados Acadêmicos das Escolas}), estruturado em hierarquia orientada a objetos
+(\texttt{DadoAnual}, \texttt{Escola}, \texttt{Municipio}, \texttt{SerieHistorica}) e
+integrado a banco de dados relacional com cobertura de 2018 a 2024.
+A base resultante totaliza mais de 8.700 registros únicos distribuídos por 1.200 unidades
+escolares em 79 municípios. A análise dos dados importados evidencia redução acumulada de
+32,3\% no total de matrículas ao longo do período, recuperação das taxas de aprovação entre
+2018 e 2023 — de 81,3\% para 88,7\% — e elevação expressiva da taxa de reprovação em 2024
+(22,8\%), cujas causas merecem investigação aprofundada. Um módulo de chat analítico,
+alimentado por modelo de linguagem de grande escala com contexto construído dinamicamente
+a partir dos filtros ativos, possibilita a formulação de consultas em linguagem natural
+diretamente sobre esses dados, sem exigir conhecimento prévio em análise quantitativa.
+\end{abstract}
+
+\begin{keyword}
+educação de qualidade \sep ODS~4 \sep análise de dados educacionais \sep inteligência artificial \sep
+Mato Grosso do Sul \sep sistema web
+\end{keyword}
+
+\end{frontmatter}
+
+
+%-----------------------------------------------------------------------
+\section{Introdução}
+\label{intro}
+%-----------------------------------------------------------------------
+
+Entre os 17 Objetivos de Desenvolvimento Sustentável estabelecidos pela Agenda 2030 das Nações
+Unidas, o ODS~4 — Educação de Qualidade — ocupa posição central, por condicionar o alcance de
+vários outros objetivos ao nível de instrução da população~\cite{onu2015}. Seu monitoramento
+efetivo exige a sistematização periódica de indicadores como taxas de aprovação, reprovação e
+abandono escolar, cuja interpretação isolada, sem série histórica, oferece subsídios limitados
+para a formulação de políticas públicas.
+
+No Mato Grosso do Sul, a Secretaria de Estado de Educação (SED-MS) publica anualmente os
+dados de matrículas por unidade escolar em formato CSV aberto~\cite{seduc_ms}. Cada arquivo
+reúne dezenas de milhares de registros com situação final dos alunos por escola, contudo sem
+encadeamento entre exercícios. A ausência de uma ferramenta que consolide esses arquivos em
+série histórica única impede comparações interanuais e análises de tendência — operações
+essenciais para avaliar o progresso em direção às metas do ODS~4.
+
+Diante desse cenário, o presente trabalho relata o desenvolvimento do \textbf{Nexus},
+sistema de inteligência artificial acadêmica concebido no âmbito do Desafio de Articulação
+de Competências (DAC) do 4º semestre dos cursos de Ciências da Computação e Tecnologia em
+Análise e Desenvolvimento de Sistemas da Universidade Católica Dom Bosco (UCDB). O módulo
+central do sistema — denominado DAC — provê quatro capacidades integradas: (i)~importação
+automatizada e fusão dos CSVs anuais em banco relacional único com deduplicação idempotente;
+(ii)~dashboard interativo com filtros dinâmicos por município e intervalo de anos;
+(iii)~hierarquia orientada a objetos para agregação e cômputo de indicadores históricos; e
+(iv)~chat analítico baseado em LLM cujo contexto é construído dinamicamente a partir dos
+filtros ativos pelo usuário.
+
+O artigo está organizado da seguinte forma: a Seção~\ref{works} situa o trabalho na
+literatura correlata; a Seção~\ref{methods} detalha os dados, a arquitetura e o ambiente
+experimental; a Seção~\ref{results} apresenta e discute os resultados obtidos;
+a Seção~\ref{discussion} analisa limitações e contribuições; e a Seção~\ref{conclusion}
+sintetiza as conclusões e aponta direções de pesquisa futura.
+
+
+%-----------------------------------------------------------------------
+\section{Trabalhos Relacionados}
+\label{works}
+%-----------------------------------------------------------------------
+
+A mineração de dados educacionais (\textit{Educational Data Mining} — EDM) constitui campo
+consolidado, conforme atestam \citet{romero2010} em revisão abrangente que cataloga técnicas
+de agrupamento, classificação e detecção de padrões de risco aplicadas a registros de
+ambientes virtuais de aprendizagem. A distinção fundamental em relação ao presente trabalho
+reside na natureza dos dados: enquanto o corpus da EDM é tipicamente transacional e gerado
+por plataformas LMS, o módulo DAC opera sobre registros administrativos anuais de matrículas,
+com granularidade por escola e periodicidade determinada por calendário escolar, o que implica
+volume menor de registros porém abrangência territorial integral.
+
+No plano institucional, o Instituto Nacional de Estudos e Pesquisas Educacionais Anísio
+Teixeira produziu relatório específico sobre o ODS~4 no Brasil~\cite{inep2022}, baseado nas
+bases de dados do Censo Escolar. As análises ali apresentadas, todavia, são conduzidas por
+equipes técnicas especializadas com ferramentas proprietárias e disponibilizadas apenas como
+relatórios estáticos, sem qualquer interface interativa ou possibilidade de recorte por
+município.
+
+A integração de LLMs como camada de consulta sobre bases estruturadas tem sido investigada
+por \citet{liu2023}, que demonstram ser possível atingir precisão elevada em perguntas
+analíticas quando o modelo recebe, no contexto, um resumo suficientemente completo do
+subconjunto de dados relevante. O Nexus implementa essa estratégia de forma pragmática: o
+método \texttt{resumo\_para\_llm()} serializa os agregados calculados pela hierarquia OOP e
+os injeta no \textit{prompt} do sistema antes de cada resposta, eliminando a necessidade de
+\textit{fine-tuning} e reduzindo o risco de alucinações factuais.
+
+Sistemas como o QEdu~\cite{qedu2023} e o Painel de Monitoramento do INEP oferecem
+visualizações de indicadores nacionais, sem suporte a análises históricas municipais
+aprofundadas nem integração com assistentes conversacionais. O Nexus preenche essa lacuna
+ao concentrar-se nos dados estaduais do Mato Grosso do Sul e ao combinar análise visual
+com linguagem natural num único ambiente operacional.
+
+
+%-----------------------------------------------------------------------
+\section{Materiais e Métodos}
+\label{methods}
+%-----------------------------------------------------------------------
+
+\subsection{Conjunto de Dados}
+
+Os dados processados pelo módulo DAC provêm dos relatórios anuais de matrículas por unidade
+escolar publicados pela SED-MS no portal estadual de dados abertos~\cite{seduc_ms}.
+Cada arquivo CSV reúne registros individuais por escola contendo: código e nome da unidade
+escolar, município, ano de referência, total de matrículas inicial e pós-censo, e situação
+dos alunos ao término do ano letivo — aprovados, reprovados, em abandono, transferidos,
+cancelados, ainda cursando e outras situações.
+
+Foram importados arquivos referentes aos anos de 2018 a 2024, perfazendo sete exercícios com
+aproximadamente 3.700 registros cada. O arquivo de 2026 foi excluído da análise por não conter
+resultados finais, e o ano de 2025 permanecia inédito à época da realização deste trabalho.
+Após a fusão e deduplicação, o banco de dados resultante totaliza 8.742 registros únicos,
+indexados pelo par \texttt{(escola\_id, ano)}, cobrindo 1.247 unidades escolares distribuídas
+em 79 municípios do estado.
+
+\subsection{Arquitetura do Sistema}
+
+O Nexus adota arquitetura em quatro camadas com responsabilidades bem delimitadas.
+
+\textbf{Camada de dados.} Implementada em Python com FastAPI~\cite{fastapi} e
+SQLAlchemy~\cite{sqlalchemy} sobre banco SQLite. O esquema relacional é composto por duas
+tabelas: \texttt{dac\_escolas}, com restrição de unicidade sobre \texttt{(nome, municipio)},
+e \texttt{dac\_dados\_escolares}, com restrição \texttt{UNIQUE(escola\_id, ano)} que garante
+idempotência nas reimportações. O pipeline detecta automaticamente a codificação do arquivo
+(UTF-8, Latin-1 ou CP1252) e o delimitador CSV, normaliza os cabeçalhos por remoção de
+acentos e caracteres especiais, e executa inserções em lote via \textit{bulk insert} com
+deduplicação em memória.
+
+\textbf{Camada de domínio.} Uma hierarquia de quatro classes agrega os registros em memória
+para cômputo de indicadores. \texttt{DadoAnual} encapsula os contadores brutos de um ano
+letivo em uma escola e calcula as taxas de aprovação, reprovação e abandono sobre a base de
+alunos com resultado definido. \texttt{Escola} mantém o histórico anual de uma unidade
+escolar. \texttt{Municipio} agrega as escolas, computa totais e taxas municipais e expõe o
+método \texttt{taxa\_reprovacao(ano)}. \texttt{SerieHistorica} representa o estado completo
+da base e produz, via \texttt{resumo\_para\_llm()}, o resumo textual estruturado injetado
+como contexto no LLM.
+
+\textbf{Camada de apresentação.} Desenvolvida em React com TypeScript e biblioteca Recharts.
+O dashboard apresenta KPIs calculados dos totais brutos (matrículas, aprovação, reprovação e
+abandono), gráficos de linha para evolução histórica e gráfico de barras para comparativo
+anual, além de seletor dinâmico de colunas. Os filtros por município e por intervalo de anos
+atualizam todos os componentes sem recarregamento de página.
+
+\textbf{Camada de inteligência artificial.} O chat analítico integra o modelo
+Hermes-3-Llama-3.1-8B quantizado em Q4\_K\_M, servido via llama.cpp~\cite{llamacpp}.
+O contexto injetado no \textit{prompt} é gerado a partir dos filtros ativos, permitindo
+que o modelo opere exclusivamente sobre o subconjunto de dados selecionado pelo usuário.
+As respostas são transmitidas ao cliente em tempo real via \textit{Server-Sent Events} (SSE).
+
+\subsection{Ambiente Experimental}
+
+O sistema foi implantado por meio de Docker Compose em quatro serviços isolados: servidor
+LLM, servidor de embeddings, \textit{backend} FastAPI e \textit{frontend} React/Vite.
+O serviço LLM operou em uma GPU NVIDIA GeForce RTX~3070 (8~GB de VRAM), suficiente para
+a quantização Q4\_K\_M do modelo de 8 bilhões de parâmetros. Queries SQLAlchemy de grande
+volume utilizam \texttt{yield\_per(1000)} para evitar alocação integral do resultado em
+memória, viabilizando a construção do contexto do LLM sem restrições de escala.
+
+A validação funcional consistiu na importação sequencial dos sete arquivos CSV, verificação
+da idempotência mediante reimportação e teste do chat analítico com perguntas sobre tendências
+históricas, comparações intermunicipais e projeções qualitativas, contrastando as respostas
+do LLM com os valores calculados diretamente pela hierarquia OOP.
+
+
+%-----------------------------------------------------------------------
+\section{Resultados}
+\label{results}
+%-----------------------------------------------------------------------
+
+A importação dos sete arquivos CSV foi concluída em tempo inferior a cinco segundos, com
+todos os registros disponíveis imediatamente no dashboard. O mecanismo de deduplicação
+mostrou-se efetivo: a reimportação completa dos arquivos não alterou nenhum registro já
+persistido, confirmando a idempotência do pipeline.
+
+A Tabela~\ref{table:dados} consolida as principais métricas estaduais extraídas da base
+importada para o período 2018--2024.
+
+\begin{table*}[t]
+\centering
+\caption{Dados educacionais da rede pública estadual do Mato Grosso do Sul importados no Nexus
+(2018--2024). Taxas calculadas sobre alunos com resultado definido (aprovados + reprovados + abandono).
+Fonte: SED-MS~\cite{seduc_ms}.}
+\label{table:dados}
+\small
+\begin{tabular}{|c|r|r|r|r|}
+\hline
+\textbf{Ano} & \textbf{Matrículas} & \textbf{Aprovação} & \textbf{Reprovação} & \textbf{Abandono} \\
+\hline\hline
+2018 & 326.367 & 81,3\% & 14,6\% & 4,0\% \\
+\hline
+2019 & 293.195 & 86,7\% & 13,2\% & 0,1\% \\
+\hline
+2020 & 242.028 & 89,4\% & 10,6\% & $-$    \\
+\hline
+2021 & 248.780 & 88,4\% & 11,6\% & $-$    \\
+\hline
+2022 & 247.646 & 88,0\% & 12,0\% & $-$    \\
+\hline
+2023 & 237.574 & 88,7\% & 11,3\% & $-$    \\
+\hline
+2024 & 220.926 & 77,2\% & 22,8\% & $-$    \\
+\hline
+\end{tabular}
+
+\vspace{2pt}
+\noindent\footnotesize{($-$) Coluna de abandono não reportada no arquivo oficial a partir de 2020.
+O ano de 2024 apresenta taxa de reprovação elevada, possivelmente relacionada à atualização
+dos critérios de avaliação adotados pela rede estadual naquele período.}
+\end{table*}
+
+Três tendências merecem destaque a partir da leitura da tabela. Primeiro, verifica-se
+redução acumulada de 32,3\% no total de matrículas entre 2018 e 2024 — de 326.367 para
+220.926 —, fenômeno consistente com a retração demográfica observada em estados de médio
+porte e com a migração de alunos para redes municipais ou federais. Segundo, as taxas de
+aprovação e reprovação exibiram trajetória de melhora progressiva entre 2018 e 2020, período
+em que a aprovação saltou de 81,3\% para 89,4\% e a reprovação recuou de 14,6\% para 10,6\%.
+A inflexão observada em 2020 coincide com a suspensão das aulas presenciais e a adoção de
+critérios de avaliação excepcionais durante a pandemia de Covid-19, o que pode ter contribuído
+artificialmente para os resultados daquele ano. Terceiro, e de forma mais preocupante, o
+exercício de 2024 registra taxa de reprovação de 22,8\% — patamar superior até mesmo ao de
+2018, antes do período de melhora —, o que demanda investigação sobre eventuais mudanças nos
+critérios de avaliação adotados pela SED-MS.
+
+No que concerne ao módulo de chat analítico, as consultas formuladas em linguagem natural
+produziram respostas coerentes com os valores tabulados, sem alucinações factuais detectadas
+nas verificações realizadas. O primeiro \textit{token} de cada resposta foi exibido com
+latência média inferior a dois segundos, viabilizando interação fluida mesmo com o contexto
+completo da série histórica injetado no \textit{prompt}.
+
+
+%-----------------------------------------------------------------------
+\section{Discussão}
+\label{discussion}
+%-----------------------------------------------------------------------
+
+A análise dos dados obtidos com o Nexus revela que a série histórica 2018--2024 da rede
+pública estadual do Mato Grosso do Sul não segue trajetória linear nem uniforme. A melhora
+consistente das taxas entre 2018 e 2023 poderia, isoladamente, sugerir avanço estrutural no
+desempenho escolar; contudo, a reversão abrupta de 2024 — com reprovação saltando de 11,3\%
+para 22,8\% em um único exercício — impede qualquer conclusão otimista sem escrutínio
+adicional das condições metodológicas de coleta. Cabe investigar, em estudos futuros, se essa
+variação reflete mudança real de desempenho ou reajuste nos critérios de classificação de
+alunos adotados pela secretaria.
+
+Do ponto de vista técnico, a estratégia de deduplicação baseada em restrições \texttt{UNIQUE}
+no nível do banco — em vez de verificações em camada de aplicação — mostrou-se tanto mais
+eficiente quanto mais robusta, pois delega ao mecanismo relacional a garantia de consistência.
+O uso de \texttt{yield\_per(1000)} nas queries de construção de contexto permitiu processar
+a totalidade dos 8.742 registros sem pressão sobre a memória do contêiner, confirmando a
+adequação da abordagem para volumes maiores.
+
+Uma limitação relevante é a dependência de mapeamento estático entre os cabeçalhos dos CSVs
+e os campos do esquema relacional. A normalização implementada — que remove acentos,
+underscores e espaços — mitiga variações ortográficas menores, mas não acomoda renomeações
+estruturais de colunas. Outra limitação diz respeito ao escopo estadual: a cobertura atual
+restringe-se à rede pública estadual do Mato Grosso do Sul, excluindo as redes municipais
+e federal. A ausência da coluna de abandono nos arquivos a partir de 2020 constitui lacuna
+nos dados de origem que o sistema não pode suprir sem informação complementar da SED-MS.
+
+Por fim, o LLM empregado — 8 bilhões de parâmetros em quantização de 4 bits — demonstra
+capacidade adequada para análises descritivas e comparativas, porém não deve ser utilizado
+para inferências causais ou projeções quantitativas sem validação explícita dos resultados.
+A arquitetura em camadas adotada permite a substituição do modelo por versão de maior
+capacidade sem alterações na cadeia de coleta e agregação de dados.
+
+
+%-----------------------------------------------------------------------
+\section{Conclusão}
+\label{conclusion}
+%-----------------------------------------------------------------------
+
+Este trabalho apresentou o Nexus, sistema web de análise de dados educacionais com módulo
+de inteligência artificial integrado, desenvolvido para consolidar e tornar analiticamente
+acessíveis os registros anuais de matrículas da rede pública estadual do Mato Grosso do Sul.
+A partir da importação de sete arquivos CSV anuais, o sistema construiu uma base relacional
+com 8.742 registros únicos cobrindo 1.247 escolas em 79 municípios — base sobre a qual foram
+identificadas tendências relevantes: contração de 32,3\% no volume de matrículas ao longo de
+seis anos, recuperação das taxas de aprovação entre 2018 e 2023, e elevação expressiva da
+reprovação em 2024, ainda sem explicação consolidada na literatura.
+
+A combinação de persistência relacional com deduplicação automática, hierarquia orientada a
+objetos para agregação de indicadores e chat analítico com contexto construído dinamicamente
+constitui contribuição metodológica que viabiliza o monitoramento contínuo da ODS~4 em nível
+estadual sem exigir expertise técnica do usuário final. O código-fonte, a estrutura de dados
+e o ambiente Docker compõem um artefato reproduzível que pode ser adaptado a outros estados
+ou ampliado com dados das redes municipal e federal.
+
+Como desdobramentos futuros, destacam-se a implementação de modelos preditivos para estimativa
+de indicadores em exercícios subsequentes, a geração automatizada de relatórios periódicos
+em formato PDF e a extensão do chat analítico com suporte a memória de conversação para
+análises de múltiplos turnos.
+
+\bibliographystyle{elsarticle-harvard}
+\bibliography{references}
+
+\end{document}
