@@ -31,9 +31,11 @@ consolidação e análise interativa de dados educacionais da rede pública esta
 Mato Grosso do Sul, desenvolvida como Desafio de Articulação de Competências (DAC)
 da Universidade Católica Dom Bosco no contexto do monitoramento do ODS~4 da Agenda 2030.
 Os dados de entrada são os arquivos CSV anuais de matrículas por unidade escolar
-publicados pela Secretaria de Estado de Educação (SED-MS) entre 2018 e 2024 — sete
+publicados pela Secretaria de Estado de Educação (SED-MS) entre 2018 e 2026 — oito
 arquivos que, após importação e deduplicação automática, formam uma base com 599 unidades
-escolares distribuídas em 79 municípios. O sistema disponibiliza um dashboard interativo
+escolares distribuídas em 79 municípios. O arquivo de 2026, disponibilizado parcialmente
+sem resultados finais do ano letivo, foi incorporado à base mas excluído das análises de
+tendência histórica. O sistema disponibiliza um dashboard interativo
 com filtros por município e período, e um chat analítico apoiado em modelo de linguagem
 de grande escala (LLM) que responde perguntas em linguagem natural com base nos dados
 filtrados. A estratégia de integração LLM adotada — denominada \textit{pré-busca contextual}
@@ -153,12 +155,12 @@ registro por escola com código, nome, município, ano letivo e os contadores de
 alunos ao encerramento do ano: aprovados, reprovados, em abandono, transferidos, cancelados,
 cursando e outras situações.
 
-Foram incorporados os arquivos de 2018 a 2024, totalizando sete exercícios. O arquivo
-referente a 2026 foi disponibilizado parcialmente e não foi incluído nas análises deste
-trabalho, pois não contém resultados finais do ano letivo. O arquivo de 2025 ainda não havia
-sido publicado no período de desenvolvimento. Após importação e deduplicação, a base de
-análise conta com registros de 599 unidades escolares distribuídas em 79 municípios do
-estado, indexados pelo par \texttt{(escola\_id, ano)}.
+Foram incorporados os arquivos de 2018 a 2026, totalizando oito exercícios. O arquivo
+referente a 2026 foi disponibilizado parcialmente — sem resultados finais do ano letivo —
+e, embora importado para a base, foi excluído das análises de tendência histórica. O arquivo
+de 2025 ainda não havia sido publicado no período de desenvolvimento. Após importação e
+deduplicação, a base conta com 3.703 registros de 599 unidades escolares distribuídas em
+79 municípios, indexados pelo par \texttt{(escola\_id, ano)}.
 
 As taxas de aprovação, reprovação e abandono são calculadas sobre a base de alunos com
 resultado definido — soma de aprovados, reprovados e em abandono — excluindo os demais
