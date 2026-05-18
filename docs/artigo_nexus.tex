@@ -17,7 +17,8 @@
 
 \begin{frontmatter}
 
-\title{Nexus: Uma Plataforma Web para Análise de Dados Educacionais com Suporte de LLM Aplicada ao Monitoramento da ODS~4 no Mato Grosso do Sul}
+\title{Nexus: Uma Plataforma Web para Análise de Dados Educacionais com Suporte de LLM
+       Aplicada ao Monitoramento do ODS~4 no Mato Grosso do Sul}
 
 \address[label1]{Universidade Católica Dom Bosco, Campo Grande, Brasil}
 
@@ -28,7 +29,7 @@
 Este trabalho descreve o desenvolvimento e a avaliação do Nexus, uma plataforma web para
 consolidação e análise interativa de dados educacionais da rede pública estadual do
 Mato Grosso do Sul, desenvolvida como Desafio de Articulação de Competências (DAC)
-da Universidade Católica Dom Bosco no contexto do monitoramento da ODS~4 da Agenda 2030.
+da Universidade Católica Dom Bosco no contexto do monitoramento do ODS~4 da Agenda 2030.
 Os dados de entrada são os arquivos CSV anuais de matrículas por unidade escolar
 publicados pela Secretaria de Estado de Educação (SED-MS) entre 2018 e 2024 — sete
 arquivos que, após importação e deduplicação automática, formam uma base com 599 unidades
@@ -57,7 +58,7 @@ artificial \sep modelo de linguagem \sep Mato Grosso do Sul
 \label{intro}
 %-----------------------------------------------------------------------
 
-A ODS~4 da Agenda 2030~\cite{onu2015} estabelece como meta garantir educação inclusiva,
+O ODS~4 da Agenda 2030~\cite{onu2015} estabelece como meta garantir educação inclusiva,
 equitativa e de qualidade para todos. Monitorar o avanço em direção a essa meta exige
 indicadores mensuráveis, e os mais diretos disponíveis para a educação básica brasileira
 são as taxas de aprovação, reprovação e abandono escolar — publicadas anualmente, por escola,
@@ -74,12 +75,13 @@ raramente são feitas, mesmo sendo tecnicamente simples quando os dados estão o
 
 O Nexus foi desenvolvido para eliminar essa fricção no âmbito do DAC —
 \textit{Desafio de Articulação de Competências} —, componente de avaliação semestral inserido
-na matriz curricular da Universidade Católica Dom Bosco. A plataforma automatiza a importação dos
-CSVs anuais, unifica os registros com deduplicação por restrição de banco, e expõe os dados
-consolidados por meio de dois canais: um dashboard com gráficos interativos e filtros por
-município e período; e um chat analítico baseado em LLM que responde a perguntas formuladas
-em português com base nos dados ativos. O módulo de domínio do sistema organiza os registros
-por escola, município e estado, e calcula os indicadores que alimentam ambos os canais.
+na matriz curricular da Universidade Católica Dom Bosco. A plataforma automatiza a importação
+dos CSVs anuais, unifica os registros com deduplicação por restrição de banco, e expõe os
+dados consolidados por meio de dois canais: um dashboard com gráficos interativos e filtros
+por município e período; e um chat analítico baseado em LLM que responde a perguntas
+formuladas em português com base nos dados ativos. O módulo de domínio do sistema organiza
+os registros por escola, município e estado, e calcula os indicadores que alimentam ambos
+os canais.
 
 O artigo está organizado da seguinte forma: a Seção~\ref{works} contextualiza o trabalho no
 campo da mineração de dados educacionais e no uso de LLMs para análise estruturada; a
@@ -100,42 +102,42 @@ investiga técnicas de extração de conhecimento aplicadas a registros de proce
 aprendizagem. A revisão de \citet{romero2010} cataloga abordagens de classificação,
 agrupamento e detecção de padrões em logs de interação de plataformas de ensino online.
 Embora o domínio seja diferente — o Nexus trabalha com registros administrativos anuais de
-matrícula, não com dados de interação em tempo real — o objetivo converge: tornar interpretável
-uma base que, no estado bruto, comunica pouco.
+matrícula, não com dados de interação em tempo real — o objetivo converge: tornar
+interpretável uma base que, no estado bruto, comunica pouco.
 
-O INEP publica periodicamente relatórios de acompanhamento da ODS~4 no Brasil~\cite{inep2022},
-baseados nos microdados do Censo Escolar. Esses documentos são tecnicamente sólidos, mas
-produzem análises estáticas: o leitor não pode modificar o recorte geográfico, alterar o
-período ou reformular uma pergunta. O QEdu~\cite{qedu2023} oferece visualizações interativas
-de indicadores nacionais, mas sem granularidade estadual aprofundada e sem mecanismo de
-consulta em linguagem natural. O Nexus se distingue dessas iniciativas por combinar a
-interatividade de filtros dinâmicos com um assistente conversacional capaz de responder
-perguntas analíticas sobre os dados exibidos.
+O INEP publica periodicamente relatórios de acompanhamento do ODS~4 no
+Brasil~\cite{inep2022}, baseados nos microdados do Censo Escolar. Esses documentos são
+tecnicamente sólidos, mas produzem análises estáticas: o leitor não pode modificar o recorte
+geográfico, alterar o período ou reformular uma pergunta. O QEdu~\cite{qedu2023} oferece
+visualizações interativas de indicadores nacionais, mas sem granularidade estadual
+aprofundada e sem mecanismo de consulta em linguagem natural. O Nexus se distingue dessas
+iniciativas por combinar a interatividade de filtros dinâmicos com um assistente
+conversacional capaz de responder perguntas analíticas sobre os dados exibidos.
 
 \subsection{LLMs para Análise de Dados Estruturados}
 
 A integração de LLMs com bases de dados relacionais para responder a consultas analíticas
-é uma área em desenvolvimento acelerado. \citet{liu2023} apresentam uma revisão das interfaces
-em linguagem natural para bancos de dados, mostrando que abordagens baseadas em injeção de
-contexto estruturado superam, em precisão factual, abordagens que delegam toda a inferência
-ao modelo.
+é uma área em desenvolvimento acelerado. \citet{liu2023} apresentam uma revisão das
+interfaces em linguagem natural para bancos de dados, mostrando que abordagens baseadas em
+injeção de contexto estruturado superam, em precisão factual, abordagens que delegam toda
+a inferência ao modelo.
 
 A estratégia adotada no Nexus alinha-se com esse resultado. Antes de cada resposta do chat,
-o sistema executa a consulta SQL correspondente aos filtros ativos, formata os dados agregados
-em texto estruturado e injeta esse contexto no prompt do modelo. O LLM não recebe a base
-inteira — apenas o subconjunto relevante, com as taxas do período já pré-calculadas e marcadas
-explicitamente para que o modelo as leia em vez de recalculá-las. Essa abordagem, que
-denominamos \textit{pré-busca contextual}, contrasta com o \textit{tool calling}, no qual o
-modelo emite chamadas de função durante a geração. Os experimentos iniciais com \textit{tool
-calling} nativo produziram comportamento inconsistente com o modelo utilizado, motivando a
-migração para a pré-busca.
+o sistema executa a consulta SQL correspondente aos filtros ativos, formata os dados
+agregados em texto estruturado e injeta esse contexto no prompt do modelo. O LLM não recebe
+a base inteira — apenas o subconjunto relevante, com as taxas do período já pré-calculadas e
+marcadas explicitamente para que o modelo as leia em vez de recalculá-las. Essa abordagem,
+que denominamos \textit{pré-busca contextual}, contrasta com o \textit{tool calling}, no
+qual o modelo emite chamadas de função durante a geração. Os experimentos iniciais com
+\textit{tool calling} nativo produziram comportamento inconsistente com o modelo utilizado,
+motivando a migração para a pré-busca.
 
 O uso de raciocínio em cadeia (\textit{chain-of-thought}~\cite{wei2022chain}) é explorado
 no Nexus via modo de raciocínio do Qwen3~\cite{qwen3_2025}: quando ativado, o modelo produz
 um bloco interno de raciocínio — delimitado pelos tokens \texttt{<think>} e
 \texttt{</think>} — antes da resposta final. Esse bloco é filtrado pelo backend antes de
-ser transmitido ao cliente. O resultado observado foi melhora na qualidade das estimativas e
-análises comparativas.
+ser transmitido ao cliente. O resultado observado foi melhora na qualidade das estimativas
+e análises comparativas.
 
 
 %-----------------------------------------------------------------------
@@ -146,10 +148,10 @@ análises comparativas.
 \subsection{Conjunto de Dados}
 
 Os dados utilizados são os relatórios anuais de matrículas por unidade escolar publicados
-pela SED-MS no portal estadual de dados abertos~\cite{seduc_ms}. Cada CSV contém um registro
-por escola com código, nome, município, ano letivo e os contadores de situação dos alunos ao
-encerramento do ano: aprovados, reprovados, em abandono, transferidos, cancelados, cursando e
-outras situações.
+pela SED-MS no portal estadual de dados abertos~\cite{seduc_ms}. Cada CSV contém um
+registro por escola com código, nome, município, ano letivo e os contadores de situação dos
+alunos ao encerramento do ano: aprovados, reprovados, em abandono, transferidos, cancelados,
+cursando e outras situações.
 
 Foram incorporados os arquivos de 2018 a 2024, totalizando sete exercícios. O arquivo
 referente a 2026 foi disponibilizado parcialmente e não foi incluído nas análises deste
@@ -160,11 +162,13 @@ estado, indexados pelo par \texttt{(escola\_id, ano)}.
 
 As taxas de aprovação, reprovação e abandono são calculadas sobre a base de alunos com
 resultado definido — soma de aprovados, reprovados e em abandono — excluindo os demais
-casos (transferidos, cancelados, cursando), que não representam encerramento do ciclo letivo.
+casos (transferidos, cancelados, cursando), que não representam encerramento do ciclo
+letivo.
 
 \subsection{Arquitetura do Sistema}
 
-O Nexus é organizado em quatro camadas, implementadas como serviços Docker~Compose independentes.
+O Nexus é organizado em quatro camadas, implementadas como serviços Docker Compose
+independentes.
 
 \textbf{Camada de dados.} Backend em Python com FastAPI~\cite{fastapi} e
 SQLAlchemy~\cite{sqlalchemy} sobre SQLite. O esquema relacional define duas tabelas:
@@ -204,19 +208,20 @@ características: suporte nativo a raciocínio em cadeia via tokens \texttt{/thi
 de texto. O servidor llama.cpp expõe uma API compatível com o padrão OpenAI, o que permite
 substituir o modelo sem alterações no backend.
 
-O fluxo de uma consulta no chat segue as etapas descritas abaixo:
+O fluxo de uma consulta no chat segue as etapas abaixo:
 \begin{enumerate}
   \item O cliente envia a mensagem, o histórico recente e os filtros ativos ao endpoint
         \texttt{POST /dac/chat}.
   \item O backend infere, por expressão regular, se a mensagem menciona anos, municípios ou
         períodos específicos, completando ou sobrepondo os filtros do dashboard.
   \item Os dados correspondentes são consultados diretamente no banco SQLite e formatados
-        em texto estruturado, com as taxas do período pré-calculadas e rotuladas explicitamente.
+        em texto estruturado, com as taxas do período pré-calculadas e rotuladas
+        explicitamente.
   \item O contexto formatado é injetado no prompt do sistema, junto com regras que instruem
         o modelo a ler os valores já calculados em vez de recalculá-los.
   \item A resposta é transmitida ao cliente via \textit{Server-Sent Events} (SSE). O bloco
-        de raciocínio \texttt{<think>...</think>}, quando presente, é filtrado pelo backend
-        e substituído por um indicador visual de processamento no cliente.
+        de raciocínio \texttt{<think>...<\!/think>}, quando presente, é filtrado pelo
+        backend e substituído por um indicador visual de processamento no cliente.
 \end{enumerate}
 
 O frontend detecta a fase de geração — aguardando, raciocínando ou transmitindo — e exibe
@@ -225,8 +230,9 @@ animações distintas para cada estado.
 \begin{figure}[ht]
   \centering
   \includegraphics[width=\linewidth]{fig_admin.png}
-  \caption{Painel administrativo do Nexus: status dos serviços LLM e embeddings, monitoramento
-           da GPU (NVIDIA RTX~5060, 7,7\,GB\,/\,8,0\,GB de VRAM em uso) e gerenciamento de usuários.}
+  \caption{Painel administrativo do Nexus: status dos serviços LLM e embeddings,
+           monitoramento da GPU (NVIDIA RTX~5060, 7,7\,GB\,/\,8,0\,GB de VRAM em uso)
+           e gerenciamento de usuários.}
   \label{fig:admin}
 \end{figure}
 
@@ -236,11 +242,13 @@ O sistema foi executado em um ambiente Docker Compose com quatro serviços: \tex
 (llama.cpp com CUDA), \texttt{embeddings} (servidor de embeddings), \texttt{backend}
 (FastAPI) e \texttt{frontend} (Vite/React). O serviço LLM utilizou uma GPU NVIDIA RTX~5060
 com 8~GB de VRAM. O modelo Qwen3-8B-Q4\_K\_M ocupa aproximadamente 4,5~GB de VRAM; com
-janela de contexto configurada em 8.192 tokens, a memória total utilizada ficou em torno
-de 6~GB, dentro da capacidade da GPU.
+janela de contexto configurada em 8.192 tokens, a memória total consumida exclusivamente
+pelo modelo e sua janela de contexto ficou em torno de 6~GB. O monitoramento global do
+sistema registrou picos de 7,7~GB de ocupação na VRAM devido ao overhead do sistema
+operacional e serviços adjacentes.
 
-A validação foi conduzida em três etapas: (i) importação completa dos sete arquivos CSV;
-(ii) reimportação integral para verificar idempotência; e (iii) série de consultas ao chat
+A validação foi conduzida em três etapas: (i)~importação completa dos sete arquivos CSV;
+(ii)~reimportação integral para verificar idempotência; e (iii)~série de consultas ao chat
 cobrindo tendências históricas, comparações municipais, cálculos de taxa e projeções
 estimativas, com as respostas conferidas contra os valores calculados diretamente pela
 hierarquia de classes.
@@ -262,16 +270,16 @@ Figuras~\ref{fig:dashboard_linha} e~\ref{fig:dashboard_barras}.
 
 \begin{table*}[t]
 \centering
-\caption{Indicadores educacionais da rede pública estadual do Mato Grosso do Sul (2018--2024),
-consolidados a partir dos CSVs da SED-MS. Taxas calculadas sobre alunos com resultado
-definido (aprovados + reprovados + abandono). O campo de abandono não consta nos
+\caption{Indicadores educacionais da rede pública estadual do Mato Grosso do Sul
+(2018--2024), consolidados a partir dos CSVs da SED-MS. Taxas calculadas sobre alunos com
+resultado definido (aprovados + reprovados + abandono). O campo de abandono não consta nos
 arquivos a partir de 2020. Fonte: SED-MS~\cite{seduc_ms}.}
 \label{table:dados}
 \small
 \begin{tabular}{crrrrr}
 \toprule
 \textbf{Ano} & \textbf{Matrículas} & \textbf{Aprovação} & \textbf{Reprovação} &
-\textbf{Abandono} & \textbf{Var. Matrículas} \\
+\textbf{Abandono} & \textbf{Var.\ Matrículas} \\
 \midrule
 2018 & 326.367 & 81,3\% & 14,6\% &  4,0\% & ---       \\
 2019 & 293.195 & 86,7\% & 13,2\% &  0,1\% & $-$10,2\% \\
@@ -281,32 +289,34 @@ arquivos a partir de 2020. Fonte: SED-MS~\cite{seduc_ms}.}
 2023 & 237.574 & 88,7\% & 11,3\% & n.d.   & $-$4,1\%  \\
 2024 & 220.926 & 77,2\% & 22,8\% & n.d.   & $-$7,0\%  \\
 \bottomrule
-\multicolumn{6}{l}{\footnotesize n.d. = não disponível no arquivo oficial a partir de 2020.}
+\multicolumn{6}{l}{\footnotesize n.d.\ = não disponível no arquivo oficial a partir de 2020.}
 \end{tabular}
 \end{table*}
 
 \begin{figure*}[ht]
   \centering
-  \includegraphics[width=\textwidth]{fig_dashboard_linha.png}
-  \caption{Dashboard do Nexus exibindo a evolução histórica das matrículas e taxas de desempenho
-           (2018--2024) via gráfico de linha, com filtros ativos para todos os municípios. O painel
-           lateral direito exibe uma resposta do assistente analítico com análise detalhada da série.}
+  \includegraphics[width=\textwidth]{fi_dashboard_linhas.png}
+  \caption{Dashboard do Nexus exibindo a evolução histórica das matrículas e taxas de
+           desempenho (2018--2024) via gráfico de linha, com filtros ativos para todos os
+           municípios. O painel lateral direito exibe uma resposta do assistente analítico
+           com análise detalhada da série.}
   \label{fig:dashboard_linha}
 \end{figure*}
 
 \begin{figure*}[ht]
   \centering
   \includegraphics[width=\textwidth]{fig_dashboard_barras.png}
-  \caption{Visão comparativa por ano no dashboard do Nexus, com destaque para a anomalia de 2024
-           no gráfico de barras. O chat analítico apresenta uma projeção para 2025 gerada pelo
-           assistente com base na tendência histórica dos anos anteriores.}
+  \caption{Visão comparativa por ano no dashboard do Nexus, com destaque para a anomalia
+           de 2024 no gráfico de barras. O chat analítico apresenta uma projeção para 2025
+           gerada pelo assistente com base na tendência histórica dos anos anteriores.}
   \label{fig:dashboard_barras}
 \end{figure*}
 
 O primeiro padrão visível é a queda consistente no número de matrículas ao longo de toda a
 série: de 326.367 em 2018 para 220.926 em 2024, redução acumulada de 32,3\%. A queda não
 apresenta reversão em nenhum dos sete anos — com a exceção de 2021, que registrou leve
-crescimento de 2,8\% em relação ao ano pandêmico de 2020, sem recuperar a trajetória anterior.
+crescimento de 2,8\% em relação ao ano pandêmico de 2020, sem recuperar a trajetória
+anterior.
 
 O segundo padrão refere-se às taxas de desempenho. Entre 2018 e 2023, a taxa de aprovação
 apresenta trajetória de melhora gradual — de 81,3\% para 88,7\% — e a reprovação recua
@@ -314,20 +324,20 @@ correspondentemente. O pico de aprovação em 2020 (89,4\%), coincidente com o p
 letivo afetado pela pandemia de Covid-19, provavelmente reflete critérios excepcionais de
 aprovação adotados naquele período, e não melhora efetiva de aprendizagem.
 
-O terceiro padrão é a anomalia de 2024. A taxa de reprovação salta de 11,3\% para 22,8\% — um
-aumento de 11,5 pontos percentuais em um único exercício — enquanto a aprovação cai para
+O terceiro padrão é a anomalia de 2024. A taxa de reprovação salta de 11,3\% para 22,8\% —
+um aumento de 11,5 pontos percentuais em um único exercício — enquanto a aprovação cai para
 77,2\%, patamar inferior ao de 2018. Variações dessa magnitude em séries anuais raramente
 têm explicação simples; causas possíveis incluem mudança nos critérios de classificação de
 resultados pela SED-MS, impacto defasado de perda de aprendizado pós-pandemia ou alteração
-nos critérios de avaliação adotados pela rede estadual naquele ano. Os dados disponíveis não
-permitem determinar a causa.
+nos critérios de avaliação adotados pela rede estadual naquele ano. Os dados disponíveis
+não permitem determinar a causa.
 
 No chat analítico, as consultas de validação — incluindo cálculo de taxas por período,
 comparação entre municípios e estimativas para anos não presentes na base — produziram
 respostas consistentes com os valores da Tabela~\ref{table:dados}, sem discrepâncias
-detectadas. O modo de raciocínio produziu respostas mais elaboradas para perguntas analíticas
-complexas, como projeções baseadas em tendência histórica, ao custo de maior latência até o
-primeiro token visível.
+detectadas. O modo de raciocínio produziu respostas mais elaboradas para perguntas
+analíticas complexas, como projeções baseadas em tendência histórica, ao custo de maior
+latência até o primeiro token visível.
 
 
 %-----------------------------------------------------------------------
@@ -335,32 +345,34 @@ primeiro token visível.
 \label{discussion}
 %-----------------------------------------------------------------------
 
-A contribuição mais imediata do Nexus é a que parece mais trivial: colocar sete anos de dados
-em uma única estrutura consultável. Sem a consolidação automática, a série da
+A contribuição mais imediata do Nexus é a que parece mais trivial: colocar sete anos de
+dados em uma única estrutura consultável. Sem a consolidação automática, a série da
 Tabela~\ref{table:dados} simplesmente não existe em lugar nenhum — cada CSV precisa ser
-aberto separadamente, os cabeçalhos precisam ser padronizados à mão e os totais precisam ser
-calculados fora do arquivo. Isso não é um problema técnico difícil, mas é um trabalho tedioso
-que, na prática, impede que gestores sem perfil técnico realizem análises longitudinais sobre
-sua própria rede.
+aberto separadamente, os cabeçalhos precisam ser padronizados à mão e os totais precisam
+ser calculados fora do arquivo. Isso não é um problema técnico difícil, mas é um trabalho
+tedioso que, na prática, impede que gestores sem perfil técnico realizem análises
+longitudinais sobre sua própria rede.
 
 \textbf{Deduplicação por restrição de banco.} A decisão de implementar a deduplicação
-diretamente no banco — via \texttt{UNIQUE(escola\_id, ano)} — mostrou-se mais robusta do que
-verificação em nível de aplicação. Reimportações dos mesmos arquivos em ordens diferentes e
-com diferentes configurações de mesclagem não produziram duplicatas em nenhum cenário testado.
-Uma abordagem baseada em \texttt{SELECT} antes de cada \texttt{INSERT} introduziria dois
-problemas: latência adicional por registro e uma janela de corrida em importações paralelas.
+diretamente no banco — via \texttt{UNIQUE(escola\_id, ano)} — mostrou-se mais robusta do
+que verificação em nível de aplicação. Reimportações dos mesmos arquivos em ordens
+diferentes e com diferentes configurações de mesclagem não produziram duplicatas em nenhum
+cenário testado. Uma abordagem baseada em \texttt{SELECT} antes de cada \texttt{INSERT}
+introduziria dois problemas: latência adicional por registro e uma janela de corrida em
+importações paralelas.
 
-\textbf{Pré-busca contextual versus tool calling.} A estratégia de pré-busca contextual —
-executar a query SQL antes de acionar o LLM e injetar os resultados formatados no prompt
-do sistema — provou ser mais confiável do que a alternativa de \textit{tool calling}. Nos
-experimentos iniciais com chamadas de ferramenta no formato OpenAI, o modelo não disparava
-as funções de forma consistente, respondendo diretamente sem buscar os dados. A pré-busca
-elimina essa dependência: o LLM sempre recebe os dados, independentemente de sua decisão sobre
-usar ou não uma ferramenta. A desvantagem é que a query é executada mesmo para perguntas que
-não precisam de dados numéricos, mas o custo é negligenciável dado o volume da base.
+\textbf{Pré-busca contextual versus \textit{tool calling}.} A estratégia de pré-busca
+contextual — executar a query SQL antes de acionar o LLM e injetar os resultados formatados
+no prompt do sistema — provou ser mais confiável do que a alternativa de \textit{tool
+calling}. Nos experimentos iniciais com chamadas de ferramenta no formato OpenAI, o modelo
+não disparava as funções de forma consistente, respondendo diretamente sem buscar os dados.
+A pré-busca elimina essa dependência: o LLM sempre recebe os dados, independentemente de
+sua decisão sobre usar ou não uma ferramenta. A desvantagem é que a query é executada mesmo
+para perguntas que não precisam de dados numéricos, mas o custo é negligenciável dado o
+volume da base.
 
-\textbf{Formato do contexto.} Formatar os dados como texto estruturado — em vez de passar o
-JSON da query diretamente — reduziu erros de recálculo. Quando o contexto apresentava os
+\textbf{Formato do contexto.} Formatar os dados como texto estruturado — em vez de passar
+o JSON da query diretamente — reduziu erros de recálculo. Quando o contexto apresentava os
 valores em JSON, o modelo frequentemente tentava recalcular taxas a partir dos totais
 brutos, cometendo erros aritméticos. Com os valores pré-calculados e rotulados como
 ``RESPOSTA PRONTA'', o modelo passou a copiá-los diretamente para a resposta.
@@ -387,28 +399,31 @@ sessão ativa.
 \label{conclusion}
 %-----------------------------------------------------------------------
 
-O Nexus foi desenvolvido para resolver um problema concreto: a série histórica de indicadores
-educacionais da rede pública estadual do Mato Grosso do Sul existe nos arquivos da SED-MS,
-mas a fragmentação em CSVs anuais impede sua análise direta. A plataforma automatiza a
-consolidação desses dados, expõe-os por meio de visualizações interativas e disponibiliza
-um assistente conversacional que responde em linguagem natural com base nos registros ativos.
+O Nexus foi desenvolvido para resolver um problema concreto: a série histórica de
+indicadores educacionais da rede pública estadual do Mato Grosso do Sul existe nos arquivos
+da SED-MS, mas a fragmentação em CSVs anuais impede sua análise direta. A plataforma
+automatiza a consolidação desses dados, expõe-os por meio de visualizações interativas e
+disponibiliza um assistente conversacional que responde em linguagem natural com base nos
+registros ativos.
 
-Os dados consolidados de 2018 a 2024 — 599 escolas, 79 municípios — revelaram tendências que
-não são visíveis ao se analisar um único exercício: a queda contínua de 32,3\% nas matrículas
-ao longo de seis anos; a recuperação gradual dos indicadores entre 2018 e 2023; e a reversão
-abrupta de 2024, cujas causas os dados administrativos disponíveis não permitem determinar.
+Os dados consolidados de 2018 a 2024 — 599 escolas, 79 municípios — revelaram tendências
+que não são visíveis ao se analisar um único exercício: a queda contínua de 32,3\% nas
+matrículas ao longo de seis anos; a recuperação gradual dos indicadores entre 2018 e 2023;
+e a reversão abrupta de 2024, cujas raízes exigem o cruzamento com indicadores
+socioeconômicos ou avaliações de rede externas a este banco de dados administrativo.
 
 A combinação de deduplicação em nível de banco, pré-busca contextual e contexto textual
-estruturado mostrou-se funcional para garantir respostas factuais do LLM, sem necessidade de
-\textit{fine-tuning}. O modo de raciocínio do Qwen3 demonstrou valor em consultas analíticas
-mais complexas, como estimativas de tendência histórica, desde que a janela de contexto seja
-suficiente para acomodar os tokens de raciocínio.
+estruturado mostrou-se funcional para garantir respostas factuais do LLM, sem necessidade
+de \textit{fine-tuning}. O modo de raciocínio do Qwen3 demonstrou valor em consultas
+analíticas mais complexas, como estimativas de tendência histórica, desde que a janela de
+contexto seja suficiente para acomodar os tokens de raciocínio.
 
 Como direções para trabalhos futuros, destacam-se: a implementação de alertas automáticos
 para variações atípicas na série histórica; a expansão da cobertura para dados das redes
-municipal e federal; a geração de relatórios periódicos em PDF para distribuição a gestores
-sem acesso direto ao sistema; e a investigação das causas do comportamento atípico de 2024,
-que provavelmente requer fontes de dados externas ao sistema.
+municipal e federal; a migração da camada de dados de SQLite para PostgreSQL, visando maior
+escalabilidade e robustez frente a acessos concorrentes em ambiente de produção; a geração
+de relatórios periódicos em PDF para distribuição a gestores sem acesso direto ao sistema;
+e a investigação das causas do comportamento atípico de 2024.
 
 \section*{Disponibilidade do Código}
 
