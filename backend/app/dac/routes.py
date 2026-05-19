@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Query, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import distinct, func
-from typing import Optional
+from typing import List, Optional
 
 from app.core.database import get_db
 from app.core.security import get_current_user
@@ -33,15 +33,19 @@ def _query_dados(
     municipio: Optional[str],
     ano_inicio: Optional[int],
     ano_fim: Optional[int],
+    anos: Optional[List[int]] = None,
 ):
     q = db.query(DacDadosEscolares)
     if municipio:
         ids = db.query(DacEscola.id).filter(DacEscola.municipio == municipio).subquery()
         q = q.filter(DacDadosEscolares.escola_id.in_(ids))
-    if ano_inicio:
-        q = q.filter(DacDadosEscolares.ano >= ano_inicio)
-    if ano_fim:
-        q = q.filter(DacDadosEscolares.ano <= ano_fim)
+    if anos:
+        q = q.filter(DacDadosEscolares.ano.in_(anos))
+    else:
+        if ano_inicio:
+            q = q.filter(DacDadosEscolares.ano >= ano_inicio)
+        if ano_fim:
+            q = q.filter(DacDadosEscolares.ano <= ano_fim)
     return q
 
 
@@ -187,9 +191,10 @@ async def dashboard(
     municipio: Optional[str] = Query(None),
     ano_inicio: Optional[int] = Query(None),
     ano_fim: Optional[int] = Query(None),
+    anos: Optional[List[int]] = Query(None),
     db: Session = Depends(get_db),
 ):
-    q = _query_dados(db, municipio, ano_inicio, ano_fim)
+    q = _query_dados(db, municipio, ano_inicio, ano_fim, anos)
     return _build_result(_aggregate(q.yield_per(2000)))
 
 

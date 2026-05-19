@@ -75,7 +75,7 @@ mudam de versão para versão, lidar com encodings distintos, calcular totais ag
 verificar manualmente duplicatas. O resultado é que análises longitudinais sobre essa base
 raramente são feitas, mesmo sendo tecnicamente simples quando os dados estão organizados.
 
-O Nexus foi desenvolvido para eliminar essa fricção no âmbito do DAC —
+O Nexus foi desenvolvido para mitigar essa barreira no âmbito do DAC —
 \textit{Desafio de Articulação de Competências} —, componente de avaliação semestral inserido
 na matriz curricular da Universidade Católica Dom Bosco. A plataforma automatiza a importação
 dos CSVs anuais, unifica os registros com deduplicação por restrição de banco, e expõe os
@@ -222,7 +222,7 @@ O fluxo de uma consulta no chat segue as etapas abaixo:
   \item O contexto formatado é injetado no prompt do sistema, junto com regras que instruem
         o modelo a ler os valores já calculados em vez de recalculá-los.
   \item A resposta é transmitida ao cliente via \textit{Server-Sent Events} (SSE). O bloco
-        de raciocínio \texttt{<think>...<\!/think>}, quando presente, é filtrado pelo
+        de raciocínio \\\texttt{<think>...<\!/think>}, quando presente, é filtrado pelo
         backend e substituído por um indicador visual de processamento no cliente.
 \end{enumerate}
 

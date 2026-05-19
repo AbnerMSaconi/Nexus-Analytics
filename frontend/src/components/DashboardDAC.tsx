@@ -70,9 +70,11 @@ export const DashboardDAC: React.FC = () => {
   const [status, setStatus]           = useState<Status | null>(null);
   const [anos, setAnos]               = useState<number[]>([]);
   const [municipios, setMunicipios]   = useState<string[]>([]);
-  const [anoInicio, setAnoInicio]     = useState<string>('');
-  const [anoFim, setAnoFim]           = useState<string>('');
+  const [anoInicio, setAnoInicio]       = useState<string>('');
+  const [anoFim, setAnoFim]             = useState<string>('');
   const [municipioSel, setMunicipioSel] = useState('');
+  const [modoEspecifico, setModoEspecifico] = useState(false);
+  const [anosEspecificos, setAnosEspecificos] = useState<number[]>([]);
 
   const [dashData, setDashData]             = useState<DashRow[]>([]);
   const [colunasSel, setColunasSel]         = useState<string[]>(DEFAULT_COLS);
@@ -109,7 +111,7 @@ export const DashboardDAC: React.FC = () => {
   }, [msgs, streamingAI, aiPhase]);
 
 
-  useEffect(() => { fetchDashboard(); }, [anoInicio, anoFim, municipioSel]);
+  useEffect(() => { fetchDashboard(); }, [anoInicio, anoFim, municipioSel, anosEspecificos, modoEspecifico]);
 
   async function loadAll() {
     await Promise.all([fetchStatus(), fetchAnos(), fetchMunicipios()]);
@@ -142,8 +144,12 @@ export const DashboardDAC: React.FC = () => {
     try {
       const params = new URLSearchParams();
       if (municipioSel) params.set('municipio', municipioSel);
-      if (anoInicio)    params.set('ano_inicio', anoInicio);
-      if (anoFim)       params.set('ano_fim', anoFim);
+      if (modoEspecifico) {
+        anosEspecificos.forEach(a => params.append('anos', String(a)));
+      } else {
+        if (anoInicio) params.set('ano_inicio', anoInicio);
+        if (anoFim)    params.set('ano_fim', anoFim);
+      }
       const res = await fetch(API(`/dac/dashboard?${params}`));
       if (res.ok) setDashData(await res.json());
     } catch {}
@@ -269,6 +275,14 @@ export const DashboardDAC: React.FC = () => {
   const toggleCol = (col: string) =>
     setColunasSel(prev => prev.includes(col) ? prev.filter(c => c !== col) : [...prev, col]);
 
+  const toggleAnoEspecifico = (ano: number) =>
+    setAnosEspecificos(prev => prev.includes(ano) ? prev.filter(a => a !== ano) : [...prev, ano]);
+
+  const limparFiltros = () => {
+    setAnoInicio(''); setAnoFim(''); setMunicipioSel('');
+    setAnosEspecificos([]); setModoEspecifico(false);
+  };
+
   // ── KPIs da visão atual ───────────────────────────────────────────────────
   const totAp  = dashData.reduce((a, r) => a + r.aprovados, 0);
   const totRep = dashData.reduce((a, r) => a + r.reprovados, 0);
@@ -283,7 +297,9 @@ export const DashboardDAC: React.FC = () => {
   ];
 
   const filtrosDesc = [
-    anoInicio || anoFim ? `Período: ${anoInicio || '...'} → ${anoFim || '...'}` : 'Período: todos',
+    modoEspecifico
+      ? anosEspecificos.length > 0 ? `Anos: ${anosEspecificos.sort((a, b) => a - b).join(', ')}` : 'Anos: todos'
+      : anoInicio || anoFim ? `Período: ${anoInicio || '...'} → ${anoFim || '...'}` : 'Período: todos',
     municipioSel ? `Local: ${municipioSel}` : 'Local: todos',
   ].join(' · ');
 
@@ -346,28 +362,65 @@ export const DashboardDAC: React.FC = () => {
 
         {/* Filtros */}
         <div className="px-6 py-3 flex flex-wrap gap-3 border-b border-slate-800 bg-slate-900/30 shrink-0">
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-slate-500 uppercase tracking-wider">De</span>
-            <select
-              value={anoInicio}
-              onChange={e => setAnoInicio(e.target.value)}
-              className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-white"
+          {/* Toggle modo */}
+          <div className="flex items-center rounded-lg border border-slate-700 overflow-hidden text-xs font-medium shrink-0">
+            <button
+              onClick={() => setModoEspecifico(false)}
+              className={`px-3 py-1.5 transition-colors ${!modoEspecifico ? 'bg-blue-700 text-white' : 'text-slate-400 hover:text-slate-200'}`}
             >
-              <option value="">Início</option>
-              {anos.map(a => <option key={a} value={a}>{a}</option>)}
-            </select>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-slate-500 uppercase tracking-wider">Até</span>
-            <select
-              value={anoFim}
-              onChange={e => setAnoFim(e.target.value)}
-              className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-white"
+              Período
+            </button>
+            <button
+              onClick={() => setModoEspecifico(true)}
+              className={`px-3 py-1.5 transition-colors ${modoEspecifico ? 'bg-blue-700 text-white' : 'text-slate-400 hover:text-slate-200'}`}
             >
-              <option value="">Fim</option>
-              {anos.map(a => <option key={a} value={a}>{a}</option>)}
-            </select>
+              Anos específicos
+            </button>
           </div>
+
+          {!modoEspecifico ? (
+            <>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-500 uppercase tracking-wider">De</span>
+                <select
+                  value={anoInicio}
+                  onChange={e => setAnoInicio(e.target.value)}
+                  className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-white"
+                >
+                  <option value="">Início</option>
+                  {anos.map(a => <option key={a} value={a}>{a}</option>)}
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-500 uppercase tracking-wider">Até</span>
+                <select
+                  value={anoFim}
+                  onChange={e => setAnoFim(e.target.value)}
+                  className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-white"
+                >
+                  <option value="">Fim</option>
+                  {anos.map(a => <option key={a} value={a}>{a}</option>)}
+                </select>
+              </div>
+            </>
+          ) : (
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {anos.map(a => (
+                <button
+                  key={a}
+                  onClick={() => toggleAnoEspecifico(a)}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors ${
+                    anosEspecificos.includes(a)
+                      ? 'bg-blue-700 border-blue-600 text-white'
+                      : 'border-slate-700 text-slate-400 hover:border-slate-500 hover:text-slate-200'
+                  }`}
+                >
+                  {a}
+                </button>
+              ))}
+            </div>
+          )}
+
           {municipios.length > 0 && (
             <select
               value={municipioSel}
@@ -378,9 +431,9 @@ export const DashboardDAC: React.FC = () => {
               {municipios.map(m => <option key={m} value={m}>{m}</option>)}
             </select>
           )}
-          {(anoInicio || anoFim || municipioSel) && (
+          {(anoInicio || anoFim || municipioSel || anosEspecificos.length > 0) && (
             <button
-              onClick={() => { setAnoInicio(''); setAnoFim(''); setMunicipioSel(''); }}
+              onClick={limparFiltros}
               className="text-xs text-slate-500 hover:text-slate-300 underline"
             >
               Limpar filtros
@@ -500,7 +553,9 @@ export const DashboardDAC: React.FC = () => {
                   <h2 className="text-sm font-semibold text-slate-300 mb-4">
                     Evolução por Ano
                     {municipioSel ? ` — ${municipioSel}` : ''}
-                    {(anoInicio || anoFim) ? ` (${anoInicio || '...'} → ${anoFim || '...'})` : ''}
+                    {modoEspecifico && anosEspecificos.length > 0
+                      ? ` (${anosEspecificos.sort((a, b) => a - b).join(', ')})`
+                      : (anoInicio || anoFim) ? ` (${anoInicio || '...'} → ${anoFim || '...'})` : ''}
                   </h2>
                   <ResponsiveContainer width="100%" height={440}>
                     <LineChart data={dashData}>

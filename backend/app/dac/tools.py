@@ -26,6 +26,11 @@ TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
+                    "anos": {
+                        "type": "array",
+                        "items": {"type": "integer"},
+                        "description": "Lista de anos específicos a buscar (ex: [2018, 2021]). Use quando quiser comparar anos não consecutivos. Tem precedência sobre ano_inicio/ano_fim."
+                    },
                     "ano_inicio": {
                         "type": "integer",
                         "description": "Ano inicial do período (inclusive). Omita para incluir desde o primeiro ano disponível."
@@ -73,6 +78,7 @@ def executar_tool(name: str, args: dict, db: Session) -> str:
         return json.dumps({"municipios": municipios})
 
     if name == "buscar_dados":
+        anos      = args.get("anos")
         ano_inicio = args.get("ano_inicio")
         ano_fim    = args.get("ano_fim")
         municipio  = args.get("municipio")
@@ -83,10 +89,13 @@ def executar_tool(name: str, args: dict, db: Session) -> str:
         )
         if municipio:
             q = q.filter(DacEscola.municipio == municipio)
-        if ano_inicio:
-            q = q.filter(DacDadosEscolares.ano >= ano_inicio)
-        if ano_fim:
-            q = q.filter(DacDadosEscolares.ano <= ano_fim)
+        if anos:
+            q = q.filter(DacDadosEscolares.ano.in_(anos))
+        else:
+            if ano_inicio:
+                q = q.filter(DacDadosEscolares.ano >= ano_inicio)
+            if ano_fim:
+                q = q.filter(DacDadosEscolares.ano <= ano_fim)
 
         grupos: dict[int, dict] = defaultdict(lambda: {c: 0 for c in _CAMPOS_NUM})
         for dados, _ in q.yield_per(2000):
